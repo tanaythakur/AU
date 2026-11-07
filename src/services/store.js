@@ -8,9 +8,13 @@
  */
 import { useSyncExternalStore } from 'react'
 import { addDays, addMonths, endOfMonth, format, isAfter, parseISO, startOfMonth, startOfYear, subMonths } from 'date-fns'
+import { formatDate, formatHour } from '@/utils/format'
 import {
-  BRAND, TODAY, bookings, daysLeft, expenses, iso, membershipStatus, memberships, payments, plans, students,
+  BRAND, TODAY, bookings, daysLeft, expenses, incomeEntries, iso, membershipStatus, memberships, payments, plans, students,
 } from '@/data/mock'
+import { incomeRecords, totalsFor as accountingTotals } from './accounting'
+
+export const totalsFor = accountingTotals
 
 /* ---------------- subscription ---------------- */
 let version = 0
@@ -23,12 +27,28 @@ const subscribe = (l) => (listeners.add(l), () => listeners.delete(l))
 /** Call at the top of any component that reads data; returns a number to use as a memo dependency. */
 export const useStore = () => useSyncExternalStore(subscribe, () => version)
 
+/* ---------------- audit log (financial records) ---------------- */
+export const auditLog = []
+const actor = () => {
+  try { return JSON.parse(localStorage.getItem('cricket_admin_session') || '{}').email || 'admin' } catch { return 'admin' }
+}
+/** changes: {field: [before, after]} for edits; summary: short human text. */
+function audit(entity, entity_id, code, action, summary, changes) {
+  auditLog.unshift({ id: `a${auditLog.length + 1}`, at: format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"), actor: actor(), entity, entity_id, code, action, summary, changes: changes || null })
+}
+export const logExport = (summary) => { audit('export', '-', '-', 'export', summary); notify() }
+const diff = (before, after, fields) => {
+  const c = {}
+  fields.forEach((f) => { if (String(before[f] ?? '') !== String(after[f] ?? '')) c[f] = [before[f] ?? '', after[f] ?? ''] })
+  return c
+}
+
 let uid = 1000
 const newId = (p) => `${p}${++uid}`
 
 /* ---------------- settings (academy profile + UPI id) ---------------- */
 const SETTINGS_KEY = 'cricket_settings'
-let settings = { name: BRAND.name, phone: '', address: 'Chhindwara, Madhya Pradesh', upi_id: '' }
+let settings = { name: BRAND.name, phone: '', address: 'Chhindwara, Madhya Pradesh', upi_id: '', hourly_rate: 500, open_hour: 6, close_hour: 22 }
 try {
   settings = { ...settings, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }
 } catch { /* ignore */ }
@@ -80,13 +100,18 @@ export function studentRow(s) {
 
 export function enrichBooking(b) {
   const paid = paidForBooking(b.id)
-  return { ...b, paid, balance: Math.max(0, b.total_amount - paid), pay_status: paymentStatusOf(b.total_amount, paid) }
+  const cancelled = b.status === 'cancelled'
+  return {
+    ...b, paid, hours: b.end_hour - b.start_hour,
+    balance: cancelled ? 0 : Math.max(0, b.total_amount - paid),
+    pay_status: cancelled ? 'cancelled' : paymentStatusOf(b.total_amount, paid),
+  }
 }
 
 export const payerName = (p) => (p.student_id ? getStudent(p.student_id)?.full_name : getBooking(p.arena_booking_id)?.customer_name) || '—'
 export const paymentType = (p) => (p.student_id ? 'Membership' : 'Arena booking')
 export const paymentLinkLabel = (p) =>
-  p.membership_id ? `${getMembership(p.membership_id)?.plan_name} plan` : getBooking(p.arena_booking_id)?.details || '—'
+  p.membership_id ? `${getMembership(p.membership_id)?.plan_name} plan` : (() => { const b = getBooking(p.arena_booking_id); return b ? `${formatDate(b.booking_date)}, ${formatHour(b.start_hour)}–${formatHour(b.end_hour)}` : '—' })()
 
 /* ---------------- membership dates ---------------- */
 /** Calendar months, inclusive end date: 15 Jan + 1 month => 14 Feb. */
@@ -123,6 +148,7 @@ export function addMembership({ student_id, plan_id, start_date }) {
     start_date, end_date: endDateFor(start_date, plan.duration_months), amount: plan.standard_price, // price snapshot
   }
   memberships.push(m)
+  audit('membership', m.id, m.id, 'create', `${m.plan_name} ${m.start_date} to ${m.end_date}, ${m.amount}`)
   notify()
   return m
 }
@@ -143,11 +169,15 @@ export function recordPayment({ student_id, membership_id, arena_booking_id, amo
     payment_date: nowStamp(), payment_method, reference_number: reference_number || '', status: 'completed',
   }
   payments.push(p)
+  audit('payment', p.id, p.receipt_number, 'create', `Received ${amt} by ${payment_method}`)
   notify()
   return p
 }
 export function refundPayment(id) {
-  getPayment(id).status = 'refunded'
+  const p = getPayment(id)
+  p.status = 'refunded'
+  p.refunded_at = nowStamp()
+  audit('payment', id, p.receipt_number, 'refund', `Refunded ${p.amount}`, { status: ['completed', 'refunded'] })
   notify()
 }
 
@@ -163,20 +193,114 @@ export function enrollStudent({ student, plan_id, start_date, payment }) {
   return { student: s, membership: m, payment: p }
 }
 
-export function addBooking({ customer_name, mobile, booking_date, details, total_amount, advance }) {
-  const b = { id: newId('b'), customer_name: customer_name.trim(), mobile: mobile.trim(), booking_date, details: details.trim(), total_amount: Number(total_amount), created_at: iso(TODAY) }
+/** Hours already taken on a date (cancelled bookings release their slots). */
+export const bookedHours = (dateISO) => {
+  const taken = new Set()
+  bookings.filter((b) => b.booking_date === dateISO && b.status !== 'cancelled').forEach((b) => {
+    for (let h = b.start_hour; h < b.end_hour; h++) taken.add(h)
+  })
+  return taken
+}
+/** Half-open interval overlap: [s1,e1) and [s2,e2) overlap iff s1 < e2 and s2 < e1. */
+const overlaps = (s1, e1, s2, e2) => s1 < e2 && s2 < e1
+
+/**
+ * Re-checks the slot at save time, inside the same synchronous step as the insert.
+ * The real protection must live in the database (see supabase/migrations/0001_arena_slots.sql);
+ * this mirrors it so the demo behaves the same way.
+ */
+export function addBooking({ customer_name, mobile, booking_date, details, start_hour, end_hour, total_amount, advance }) {
+  if (!(end_hour > start_hour)) throw new Error('Pick at least one time slot.')
+  const clash = bookings.find((b) => b.booking_date === booking_date && b.status !== 'cancelled' && overlaps(start_hour, end_hour, b.start_hour, b.end_hour))
+  if (clash) throw new Error('One of these slots was just booked. Pick another time.')
+  const b = {
+    id: newId('b'), customer_name: customer_name.trim(), mobile: mobile.trim(), booking_date, details: (details || '').trim(),
+    start_hour, end_hour, total_amount: Number(total_amount), status: 'confirmed', created_at: iso(TODAY),
+  }
   bookings.unshift(b)
+  audit('booking', b.id, b.id, 'create', `${customer_name} ${booking_date} ${start_hour}:00-${end_hour}:00, total ${b.total_amount}`)
   let p = null
   if (advance?.amount > 0) p = recordPayment({ arena_booking_id: b.id, ...advance })
   else notify()
   return { booking: b, payment: p }
 }
+export function cancelBooking(id) {
+  audit('booking', id, id, 'cancel', `Cancelled booking of ${getBooking(id).customer_name}`, { status: ['confirmed', 'cancelled'] })
+  getBooking(id).status = 'cancelled' // payments stay in the ledger; refund separately if money is returned
+  notify()
+}
 
+const EXP_FIELDS = ['name', 'category', 'amount', 'expense_date', 'payment_method', 'vendor', 'reason', 'status', 'paid_date', 'quantity']
 export function saveExpense(data, id) {
-  const clean = { name: data.name.trim(), amount: Number(data.amount), expense_date: data.expense_date, reason: (data.reason || '').trim(), quantity: data.quantity ? Number(data.quantity) : null }
-  if (id) Object.assign(expenses.find((e) => e.id === id), clean)
-  else expenses.unshift({ id: newId('e'), ...clean })
+  const status = data.status === 'pending' ? 'pending' : 'paid'
+  const clean = {
+    name: data.name.trim(), category: data.category, amount: Number(data.amount), expense_date: data.expense_date,
+    vendor: (data.vendor || '').trim(), reason: (data.reason || '').trim(), quantity: data.quantity ? Number(data.quantity) : null,
+    status, payment_method: status === 'paid' ? data.payment_method || 'cash' : '', paid_date: status === 'paid' ? data.paid_date || data.expense_date : null,
+  }
+  if (!(clean.amount > 0)) throw new Error('Amount must be more than zero.')
+  if (id) {
+    const e = expenses.find((x) => x.id === id)
+    const changes = diff(e, clean, EXP_FIELDS)
+    Object.assign(e, clean)
+    if (data.attachment !== undefined) {
+      if (e.attachment?.name !== data.attachment?.name) changes.attachment = [e.attachment?.name || '', data.attachment?.name || '']
+      e.attachment = data.attachment
+    }
+    audit('expense', id, e.code, 'update', `Edited ${e.name}`, changes)
+  } else {
+    const e = { id: newId('e'), code: `EXP-${String(expenses.length + 1).padStart(5, '0')}`, ...clean, attachment: data.attachment || null }
+    expenses.unshift(e)
+    audit('expense', e.id, e.code, 'create', `${e.name} ${e.amount} (${e.category}, ${e.status})`)
+  }
   expenses.sort((a, b) => b.expense_date.localeCompare(a.expense_date))
+  notify()
+}
+export function markExpensePaid(id, method = 'cash') {
+  const e = expenses.find((x) => x.id === id)
+  const changes = { status: ['pending', 'paid'], paid_date: ['', iso(TODAY)], payment_method: ['', method] }
+  Object.assign(e, { status: 'paid', paid_date: iso(TODAY), payment_method: method })
+  audit('expense', id, e.code, 'update', `Marked paid: ${e.name}`, changes)
+  notify()
+}
+export function deleteExpense(id) {
+  const i = expenses.findIndex((x) => x.id === id)
+  const [e] = expenses.splice(i, 1)
+  audit('expense', id, e.code, 'delete', `Deleted ${e.name} ${e.amount}`, { snapshot: [JSON.stringify({ ...e, attachment: e.attachment?.name || null }), ''] })
+  notify()
+}
+
+const INC_FIELDS = ['title', 'category', 'amount', 'income_date', 'payment_method', 'status', 'description', 'reference', 'received_date']
+export function saveIncome(data, id) {
+  const status = ['paid', 'pending', 'cancelled'].includes(data.status) ? data.status : 'paid'
+  const clean = {
+    title: data.title.trim(), category: data.category, amount: Number(data.amount), income_date: data.income_date, status,
+    payment_method: status === 'paid' ? data.payment_method || 'cash' : data.payment_method || '', description: (data.description || '').trim(), reference: (data.reference || '').trim(),
+    received_date: status === 'paid' ? data.received_date || data.income_date : null,
+  }
+  if (!(clean.amount > 0)) throw new Error('Amount must be more than zero.')
+  if (id) {
+    const i = incomeEntries.find((x) => x.id === id)
+    audit('income', id, i.code, 'update', `Edited ${i.title}`, diff(i, clean, INC_FIELDS))
+    Object.assign(i, clean)
+  } else {
+    const i = { id: newId('i'), code: `INC-${String(incomeEntries.length + 1).padStart(5, '0')}`, ...clean }
+    incomeEntries.unshift(i)
+    audit('income', i.id, i.code, 'create', `${i.title} ${i.amount} (${i.category}, ${i.status})`)
+  }
+  notify()
+}
+export function markIncomeReceived(id, method = 'cash') {
+  const i = incomeEntries.find((x) => x.id === id)
+  const changes = { status: [i.status, 'paid'], received_date: ['', iso(TODAY)] }
+  Object.assign(i, { status: 'paid', received_date: iso(TODAY), payment_method: method })
+  audit('income', id, i.code, 'update', `Marked received: ${i.title}`, changes)
+  notify()
+}
+export function deleteIncome(id) {
+  const k = incomeEntries.findIndex((x) => x.id === id)
+  const [i] = incomeEntries.splice(k, 1)
+  audit('income', id, i.code, 'delete', `Deleted ${i.title} ${i.amount}`, { snapshot: [JSON.stringify(i), ''] })
   notify()
 }
 
@@ -201,17 +325,12 @@ export function periodRange(period) {
 }
 export const inRange = (dateStr, range) => !range || (dateStr.slice(0, 10) >= range[0] && dateStr.slice(0, 10) <= range[1])
 
-/** Same arithmetic everywhere: collected = completed payments; surplus = collected − expenses. */
-export function totalsFor(range) {
-  const collected = sumPaid(payments.filter((p) => inRange(p.payment_date, range)))
-  const spent = expenses.filter((e) => inRange(e.expense_date, range)).reduce((t, e) => t + e.amount, 0)
-  return { collected, spent, surplus: collected - spent }
-}
-
+/** Receivables across all time, from the same income records the Accounts section uses. */
 export function pendingTotals() {
-  const academy = students.filter((s) => s.status === 'active').reduce((t, s) => t + studentRow(s).outstanding, 0)
-  const arena = bookings.reduce((t, b) => t + enrichBooking(b).balance, 0)
-  return { academy, arena, total: academy + arena }
+  const recs = incomeRecords(null)
+  const by = (k) => recs.filter((x) => x.kind === k).reduce((t, x) => t + x.balance, 0)
+  const academy = by('membership'), arena = by('arena'), other = by('manual')
+  return { academy, arena, other, total: academy + arena + other }
 }
 
 export function monthlySeries(n = 6) {
@@ -232,24 +351,26 @@ export function admissionsSeries(n = 6) {
 export function collectionsByMethod(range) {
   const map = {}
   payments.filter((p) => p.status === 'completed' && inRange(p.payment_date, range)).forEach((p) => { map[p.payment_method] = (map[p.payment_method] || 0) + p.amount })
+  incomeEntries.filter((i) => i.status === 'paid' && inRange(i.received_date || i.income_date, range)).forEach((i) => { map[i.payment_method] = (map[i.payment_method] || 0) + i.amount })
   return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
 }
 export function collectionsBySource(range) {
   const done = payments.filter((p) => p.status === 'completed' && inRange(p.payment_date, range))
+  const other = incomeEntries.filter((i) => i.status === 'paid' && inRange(i.received_date || i.income_date, range)).reduce((t, i) => t + i.amount, 0)
   return [
     { name: 'Academy fees', value: sumPaid(done.filter((p) => p.student_id)) },
     { name: 'Arena bookings', value: sumPaid(done.filter((p) => p.arena_booking_id)) },
+    ...(other > 0 ? [{ name: 'Other income', value: other }] : []),
   ]
 }
-/** Groups by expense name (case-insensitive) so "Electricity bill" rolls up across months. */
+/** Paid expenses grouped by category (cash basis, on the date they were paid). */
 export function expenseBreakdown(range) {
   const map = new Map()
-  expenses.filter((e) => inRange(e.expense_date, range)).forEach((e) => {
-    const k = e.name.trim().toLowerCase()
-    const cur = map.get(k) || { name: e.name.trim(), value: 0, count: 0 }
+  expenses.filter((e) => e.status === 'paid' && inRange(e.paid_date || e.expense_date, range)).forEach((e) => {
+    const cur = map.get(e.category) || { name: e.category, value: 0, count: 0 }
     cur.value += e.amount
     cur.count += 1
-    map.set(k, cur)
+    map.set(e.category, cur)
   })
   return [...map.values()].sort((a, b) => b.value - a.value)
 }

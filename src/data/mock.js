@@ -102,18 +102,23 @@ export const daysLeft = (m) => differenceInCalendarDays(parseISO(m.end_date), TO
 export const isExpiringSoon = (m) => membershipStatus(m) === 'active' && daysLeft(m) <= 7
 
 /* ---------------- Arena bookings ---------------- */
+// Hourly slots: start_hour/end_hour are 24h integers, half-open [start, end).
 export const bookings = []
-// [name, mobile, dayOffset, details, total, advance, method]
+// [name, mobile, dayOffset, notes, startHour, hours, total, advance, method]
 ;[
-  ['Chhindwara Lions XI', '9893012345', 3, 'Outdoor pitch, Sat 6–8 AM', 3000, 1000, 'upi'],
-  ['Rahul Deshmukh', '9826098765', 1, 'Indoor turf, 4 nets, 7–8 PM', 1200, 1200, 'cash'],
-  ['Satpura Cricket Club', '9770011223', -2, 'Full ground, practice match', 6000, 3000, 'bank_transfer'],
-  ['Vikram Malviya', '9425077889', -6, 'Indoor turf, 2 hrs', 800, 0, 'cash'],
-  ['Mahadev Sports Association', '9302055667', 8, 'Outdoor pitch, Sunday league', 4500, 1500, 'upi'],
-  ['Pench Warriors', '9981044556', -12, 'Team nets, evening', 2000, 2000, 'cash'],
-].forEach(([customer_name, mobile, d, details, total_amount, advance, method], i) => {
+  ['Chhindwara Lions XI', '9893012345', 3, 'Outdoor pitch', 6, 2, 1000, 500, 'upi'],
+  ['Rahul Deshmukh', '9826098765', 1, '4 nets', 19, 1, 500, 500, 'cash'],
+  ['Satpura Cricket Club', '9770011223', -2, 'Practice match', 16, 3, 1500, 750, 'bank_transfer'],
+  ['Vikram Malviya', '9425077889', -6, '', 7, 1, 500, 0, 'cash'],
+  ['Mahadev Sports Association', '9302055667', 8, 'Sunday league', 17, 3, 1500, 500, 'upi'],
+  ['Pench Warriors', '9981044556', -12, 'Team nets', 18, 2, 1000, 1000, 'cash'],
+  ['Walk-in team', '9755500011', 3, '', 18, 2, 1000, 1000, 'upi'],
+].forEach(([customer_name, mobile, d, details, start_hour, hours, total_amount, advance, method], i) => {
   const created = off(Math.min(d, 0) - 1)
-  const b = { id: `b${i + 1}`, customer_name, mobile, booking_date: off(d), details, total_amount, created_at: created }
+  const b = {
+    id: `b${i + 1}`, customer_name, mobile, booking_date: off(d), details, start_hour, end_hour: start_hour + hours,
+    total_amount, status: 'confirmed', created_at: created,
+  }
   bookings.push(b)
   if (advance > 0)
     payments.push({
@@ -128,7 +133,10 @@ export const bookings = []
 })
 // one refunded example
 const refundable = payments.find((p) => p.student_id && p._sort < TODAY.getTime() - 86400000 * 5)
-if (refundable) refundable.status = 'refunded'
+if (refundable) {
+  refundable.status = 'refunded'
+  refundable.refunded_at = `${iso(addDays(TODAY, -3))}T11:00:00`
+}
 
 payments.sort((a, b) => a._sort - b._sort)
 payments.forEach((p, i) => {
@@ -137,25 +145,53 @@ payments.forEach((p, i) => {
   delete p._sort
 })
 
-/* ---------------- Expenses ---------------- */
-// [name, amount, dayOffset, quantity, reason]
-export const expenses = [
-  ['Coach salaries', 22000, -6, null, 'Monthly coach salaries'],
-  ['Electricity bill', 4850, -5, null, 'Floodlights, monthly'],
-  ['Ground rent', 8000, -4, null, 'Monthly land lease'],
-  ['Cricket balls', 8000, -12, 100, 'New ball purchase'],
-  ['Pitch preparation', 3200, -9, null, 'Roller and labour'],
-  ['Net repair', 1400, -17, null, 'Stitching and repair'],
-  ['Broadband', 799, -8, null, 'Monthly internet'],
-  ['Stumps set', 2400, -20, 4, 'Wooden stumps'],
-  ['Water tanker', 900, -2, null, ''],
-  ['Cleaning supplies', 1250, -11, null, ''],
-  ['Coach salaries', 22000, -36, null, 'Monthly coach salaries'],
-  ['Electricity bill', 5120, -35, null, 'Floodlights, monthly'],
-  ['Trophies', 3800, -1, 6, 'Academy cup trophies'],
+/* ---------------- Accounting categories ---------------- */
+// cogs: true => counted as "cost of goods / services sold" in the P&L (everything else is an operating expense)
+export const EXPENSE_CATEGORIES = [
+  { name: 'Rent', cogs: false }, { name: 'Salary', cogs: false }, { name: 'Marketing', cogs: false },
+  { name: 'Electricity', cogs: false }, { name: 'Internet', cogs: false }, { name: 'Travel', cogs: false },
+  { name: 'Maintenance', cogs: false }, { name: 'Purchases', cogs: true }, { name: 'Miscellaneous', cogs: false },
 ]
-  .map(([name, amount, d, quantity, reason], i) => ({ id: `e${i + 1}`, name, amount, quantity, expense_date: off(d), reason }))
+export const isCogs = (category) => !!EXPENSE_CATEGORIES.find((c) => c.name === category)?.cogs
+export const INCOME_CATEGORIES = ['Tournament fees', 'Sponsorship', 'Merchandise / canteen', 'Miscellaneous income']
+
+/* ---------------- Expenses ---------------- */
+// [title, category, amount, dayOffset, method, vendor, status, quantity, description]
+export const expenses = [
+  ['Coach salaries', 'Salary', 22000, -6, 'bank_transfer', 'Coaching staff', 'paid', null, 'Monthly coach salaries'],
+  ['Electricity bill', 'Electricity', 4850, -5, 'upi', 'MP Madhya Kshetra Vidyut', 'paid', null, 'Floodlights, monthly'],
+  ['Ground rent', 'Rent', 8000, -4, 'bank_transfer', 'K. Choudhary', 'paid', null, 'Monthly land lease'],
+  ['Cricket balls', 'Purchases', 8000, -12, 'upi', 'Singh Sports, Nagpur', 'paid', 100, 'New ball purchase'],
+  ['Pitch preparation', 'Maintenance', 3200, -9, 'cash', 'Ramlal & sons', 'paid', null, 'Roller and labour'],
+  ['Net repair', 'Maintenance', 1400, -17, 'cash', 'Local tailor', 'paid', null, 'Stitching and repair'],
+  ['Broadband', 'Internet', 799, -8, 'upi', 'Fibernet', 'paid', null, 'Monthly internet'],
+  ['Stumps set', 'Purchases', 2400, -20, 'upi', 'Singh Sports, Nagpur', 'paid', 4, 'Wooden stumps'],
+  ['Water tanker', 'Miscellaneous', 900, -2, 'cash', 'Municipal supplier', 'paid', null, ''],
+  ['Cleaning supplies', 'Maintenance', 1250, -11, 'upi', 'Gupta Traders', 'paid', null, ''],
+  ['Pamphlets for admission drive', 'Marketing', 2600, -20, 'cash', 'Sai Printers', 'paid', null, ''],
+  ['District trials travel', 'Travel', 6400, -26, 'bank_transfer', 'Shree Travels', 'paid', null, ''],
+  ['Coach salaries', 'Salary', 22000, -36, 'bank_transfer', 'Coaching staff', 'paid', null, 'Monthly coach salaries'],
+  ['Electricity bill', 'Electricity', 5120, -35, 'upi', 'MP Madhya Kshetra Vidyut', 'paid', null, 'Floodlights, monthly'],
+  ['Trophies', 'Purchases', 3800, -1, '', 'Trophy House', 'pending', 6, 'Academy cup trophies'],
+  ['Floodlight bulbs', 'Maintenance', 7200, 0, '', 'Electro Mart', 'pending', 8, ''],
+]
+  .map(([name, category, amount, d, payment_method, vendor, status, quantity, reason], i) => ({
+    id: `e${i + 1}`, code: `EXP-${String(i + 1).padStart(5, '0')}`, name, category, amount, expense_date: off(d),
+    payment_method, vendor, status, paid_date: status === 'paid' ? off(d) : null, quantity, reason, attachment: null,
+  }))
   .sort((a, b) => b.expense_date.localeCompare(a.expense_date))
+
+/* ---------------- Other (manual) income ---------------- */
+// Student fees and arena bookings are income automatically (from memberships/bookings); these are the rest.
+// status: paid | pending | cancelled
+export const incomeEntries = [
+  ['Local T20 tournament registrations', 'Tournament fees', 2500, -3, 'upi', 'paid', 'Team entry fees', 'TRN-2026-01'],
+  ['Banner space sponsor', 'Sponsorship', 1800, -14, 'cash', 'paid', 'Ground banner, 3 months', ''],
+  ['Annual sponsorship - local shop', 'Sponsorship', 10000, -2, '', 'pending', 'Agreed, payment awaited', 'SPN-2026-02'],
+].map(([title, category, amount, d, payment_method, status, description, reference], i) => ({
+  id: `i${i + 1}`, code: `INC-${String(i + 1).padStart(5, '0')}`, title, category, amount, income_date: off(d), payment_method, status,
+  description, reference, received_date: status === 'paid' ? off(d) : null,
+}))
 
 /* ---------------- Constants ---------------- */
 export const PAYMENT_METHODS = [

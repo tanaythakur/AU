@@ -22,7 +22,7 @@ export default function ReportsPage() {
   const series = useMemo(() => monthlySeries(6), [v])
   const adm = useMemo(() => admissionsSeries(6), [v])
   const pending = useMemo(() => pendingTotals(), [v])
-  const list = useMemo(() => expenses.filter((e) => inRange(e.expense_date, range)), [period, v])
+  const list = useMemo(() => expenses.filter((e) => e.status === 'paid' && inRange(e.paid_date || e.expense_date, range)), [period, v])
 
   return (
     <>

@@ -7,7 +7,7 @@ import { useAuth } from '@/features/auth/AuthContext'
 
 const LABELS = {
   students: 'Students', memberships: 'Memberships', payments: 'Payments', arena: 'Arena Bookings',
-  expenses: 'Expenses', reports: 'Reports', settings: 'Settings',
+  expenses: 'Expenses', accounts: 'Accounts', income: 'Income', ledger: 'Ledger', statements: 'P&L and Cash Flow', audit: 'Audit log', reports: 'Reports', settings: 'Settings',
   new: 'New', edit: 'Edit', receipt: 'Receipt',
 }
 

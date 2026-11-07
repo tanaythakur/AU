@@ -43,7 +43,7 @@ export default function DashboardPage() {
           <>
             <Button as={Link} to="/students/new" icon={UserPlus}>Add Student</Button>
             <Button as={Link} to="/arena?new=1" variant="secondary" icon={Trophy}>New Booking</Button>
-            <Button as={Link} to="/expenses?new=1" variant="secondary" icon={Plus}>Add Expense</Button>
+            <Button as={Link} to="/accounts/expenses?new=1" variant="secondary" icon={Plus}>Add Expense</Button>
           </>
         }
       />
@@ -95,7 +95,7 @@ export default function DashboardPage() {
         <ListCard title="Recent admissions" empty="No students yet">
           {d.recentAdmissions.map((s) => <Row key={s.id} to={`/students/${s.id}`} main={s.full_name} sub={`Joined ${formatDate(s.admission_date)}`} />)}
         </ListCard>
-        <ListCard title="Recent expenses" empty="No expenses yet" action={<Link to="/expenses" className="text-body-sm font-medium text-primary hover:underline">Expenses</Link>}>
+        <ListCard title="Recent expenses" empty="No expenses yet" action={<Link to="/accounts/expenses" className="text-body-sm font-medium text-primary hover:underline">Expenses</Link>}>
           {d.recentExpenses.map((e) => <Row key={e.id} main={e.name} sub={formatDate(e.expense_date)} right={<b>{formatINR(e.amount)}</b>} />)}
         </ListCard>
       </div>

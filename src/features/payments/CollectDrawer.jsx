@@ -4,7 +4,7 @@ import { CircleCheck } from 'lucide-react'
 import { Button, Drawer, useToast } from '@/components/ui'
 import PaymentPanel, { usePayment } from '@/components/payments/PaymentPanel'
 import { enrichBooking, enrichMembership, getBooking, getMembership, getStudent, recordPayment } from '@/services/store'
-import { formatDate, formatINR } from '@/utils/format'
+import { formatDate, formatHour, formatINR } from '@/utils/format'
 
 /**
  * Collect a pending balance. target: {membershipId} | {bookingId}.
@@ -21,7 +21,7 @@ function Inner({ target, onClose }) {
   const b = target.bookingId ? enrichBooking(getBooking(target.bookingId)) : null
   const balance = (m || b).balance
   const who = m ? getStudent(m.student_id)?.full_name : b.customer_name
-  const what = m ? `${m.plan_name} plan, ${formatDate(m.start_date)} – ${formatDate(m.end_date)}` : b.details
+  const what = m ? `${m.plan_name} plan, ${formatDate(m.start_date)} – ${formatDate(m.end_date)}` : `${formatDate(b.booking_date)}, ${formatHour(b.start_hour)} – ${formatHour(b.end_hour)}`
   const pay = usePayment(balance)
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState(null)

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { ChartColumn, IndianRupee, LayoutDashboard, LogOut, Receipt, Settings, Trophy, Users, X } from 'lucide-react'
+import { Calculator, ChartColumn, IndianRupee, LayoutDashboard, LogOut, Settings, Trophy, Users, X } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import { initials } from '@/utils/format'
 import { BRAND } from '@/data/mock'
@@ -10,7 +10,7 @@ export const NAV_ITEMS = [
   { to: '/students', label: 'Students', icon: Users },
   { to: '/arena', label: 'Arena Bookings', icon: Trophy },
   { to: '/payments', label: 'Payments', icon: IndianRupee },
-  { to: '/expenses', label: 'Expenses', icon: Receipt },
+  { to: '/accounts', label: 'Accounts', icon: Calculator },
   { to: '/reports', label: 'Reports', icon: ChartColumn },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]

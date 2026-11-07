@@ -48,7 +48,7 @@ function AcademyForm() {
   return (
     <Card>
       <CardHeader title="Academy & payments" description="Used on receipts, WhatsApp messages and the payment QR code." />
-      <form className="grid gap-4 sm:grid-cols-2" noValidate onSubmit={handleSubmit((d) => { updateSettings(d); toast.success('Settings saved.') })}>
+      <form className="grid gap-4 sm:grid-cols-2" noValidate onSubmit={handleSubmit((d) => { updateSettings({ ...d, hourly_rate: Number(d.hourly_rate), open_hour: Number(d.open_hour), close_hour: Number(d.close_hour) }); toast.success('Settings saved.') })}>
         <FormField label="Academy name" required error={errors.name?.message} className="sm:col-span-2">
           <Input error={errors.name} {...register('name', { required: 'Academy name is required' })} />
         </FormField>
@@ -57,6 +57,17 @@ function AcademyForm() {
           <Input error={errors.upi_id} {...register('upi_id', { pattern: { value: /^[\w.-]+@[\w.-]+$/, message: 'Enter a valid UPI ID' } })} />
         </FormField>
         <FormField label="Address" className="sm:col-span-2"><Input {...register('address')} /></FormField>
+        <div className="sm:col-span-2 border-t border-border-light pt-4"><h3 className="text-body font-semibold">Arena slots</h3></div>
+        <FormField label="Hourly rate (₹)" hint="Total = hours × rate. The admin can still override it per booking." error={errors.hourly_rate?.message}>
+          <Input type="number" min="0" error={errors.hourly_rate} {...register('hourly_rate', { required: 'Enter a rate', min: { value: 0, message: 'Cannot be negative' } })} />
+        </FormField>
+        <div />
+        <FormField label="Opens at (hour, 0–23)" error={errors.open_hour?.message}>
+          <Input type="number" min="0" max="23" error={errors.open_hour} {...register('open_hour', { required: 'Required', min: 0, max: 23 })} />
+        </FormField>
+        <FormField label="Closes at (hour, 1–24)" hint="Last slot ends at this hour. 22 = 10 PM" error={errors.close_hour?.message}>
+          <Input type="number" min="1" max="24" error={errors.close_hour} {...register('close_hour', { required: 'Required', validate: (v, f) => Number(v) > Number(f.open_hour) || 'Must be after opening' })} />
+        </FormField>
         <div className="sm:col-span-2"><Button type="submit">Save changes</Button></div>
       </form>
     </Card>

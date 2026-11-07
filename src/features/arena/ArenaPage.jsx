@@ -1,11 +1,11 @@
 import { todayISO } from '@/utils/format'
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Download, IndianRupee, MessageCircle, Plus, Trophy } from 'lucide-react'
-import { Button, DataTable, EmptyState, FilterBar, PageHeader, SearchInput, StatCard, StatusBadge } from '@/components/ui'
+import { Download, IndianRupee, MessageCircle, Plus, Trophy, X } from 'lucide-react'
+import { Button, ConfirmDialog, DataTable, EmptyState, FilterBar, PageHeader, SearchInput, StatCard, StatusBadge, useToast } from '@/components/ui'
 import { bookings } from '@/data/mock'
-import { enrichBooking, useStore } from '@/services/store'
-import { downloadCSV, formatDate, formatINR } from '@/utils/format'
+import { cancelBooking, enrichBooking, useStore } from '@/services/store'
+import { downloadCSV, formatDate, formatHour, formatINR } from '@/utils/format'
 import { bookingWhatsApp } from './whatsapp'
 import { cn } from '@/utils/cn'
 import { useSimulatedLoading } from '@/hooks/useSimulatedLoading'
@@ -18,6 +18,7 @@ const FILTERS = [{ key: 'all', label: 'All' }, { key: 'upcoming', label: 'Upcomi
 export default function ArenaPage() {
   useDocumentTitle('Arena Bookings')
   const v = useStore()
+  const toast = useToast()
   const loading = useSimulatedLoading()
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
@@ -25,8 +26,9 @@ export default function ArenaPage() {
   const newOpen = params.get('new') === '1'
   const setNewOpen = (o) => setParams(o ? { new: '1' } : {}, { replace: true })
   const [collect, setCollect] = useState(null)
+  const [cancelling, setCancelling] = useState(null)
 
-  const all = useMemo(() => bookings.map(enrichBooking).sort((a, b) => b.booking_date.localeCompare(a.booking_date)), [v])
+  const all = useMemo(() => bookings.map(enrichBooking).sort((a, b) => b.booking_date.localeCompare(a.booking_date) || b.start_hour - a.start_hour), [v])
   const today = todayISO()
   const rows = useMemo(() => {
     const t = q.trim().toLowerCase()
@@ -36,16 +38,15 @@ export default function ArenaPage() {
   }, [all, q, filter, today])
 
   const totals = {
-    count: all.length,
-    booked: all.reduce((s, b) => s + b.total_amount, 0),
-    paid: all.reduce((s, b) => s + b.paid, 0),
+    count: all.filter((b) => b.status !== 'cancelled').length,
+    booked: all.filter((b) => b.status !== 'cancelled').reduce((s, b) => s + b.total_amount, 0),
+    paid: all.filter((b) => b.status !== 'cancelled').reduce((s, b) => s + b.paid, 0),
     due: all.reduce((s, b) => s + b.balance, 0),
   }
 
   const columns = [
-    { key: 'booking_date', header: 'Date', sortable: true, render: (b) => formatDate(b.booking_date) },
+    { key: 'booking_date', header: 'Date & time', sortable: true, render: (b) => <div><p>{formatDate(b.booking_date)}</p><p className="text-caption text-text-secondary">{formatHour(b.start_hour)} – {formatHour(b.end_hour)} · {b.hours}h</p></div> },
     { key: 'customer_name', header: 'Customer', sortable: true, render: (b) => <div><p className="font-medium">{b.customer_name}</p><p className="text-caption text-text-secondary">{b.mobile}</p></div> },
-    { key: 'details', header: 'Details', className: 'whitespace-normal', render: (b) => <span className="text-text-secondary">{b.details}</span> },
     { key: 'total_amount', header: 'Total', sortable: true, align: 'right', render: (b) => formatINR(b.total_amount) },
     { key: 'paid', header: 'Paid', align: 'right', render: (b) => formatINR(b.paid) },
     { key: 'balance', header: 'Balance', sortable: true, align: 'right', render: (b) => <span className={b.balance > 0 ? 'font-semibold text-danger-text' : 'text-text-secondary'}>{formatINR(b.balance)}</span> },
@@ -55,6 +56,7 @@ export default function ArenaPage() {
       render: (b) => (
         <div className="flex items-center justify-end gap-1">
           {b.balance > 0 && <Button size="sm" variant="secondary" icon={IndianRupee} onClick={() => setCollect({ bookingId: b.id })}>Collect</Button>}
+          {b.status !== 'cancelled' && b.booking_date >= today && <Button size="sm" variant="ghost" icon={X} onClick={() => setCancelling(b)} aria-label={`Cancel booking ${b.customer_name}`}>Cancel</Button>}
           <Button size="sm" variant="ghost" icon={MessageCircle} as="a" href={bookingWhatsApp(b)} target="_blank" rel="noreferrer" aria-label={`WhatsApp ${b.customer_name}`}>WhatsApp</Button>
         </div>
       ),
@@ -65,10 +67,10 @@ export default function ArenaPage() {
     <>
       <PageHeader
         title="Arena bookings"
-        description="Simple bookings with advance and balance. Not a slot calendar."
+        description="Hourly slots with advance and balance."
         actions={
           <>
-            <Button variant="secondary" icon={Download} onClick={() => downloadCSV('arena-bookings.csv', rows.map((b) => ({ date: b.booking_date, customer: b.customer_name, mobile: b.mobile, details: b.details, total: b.total_amount, paid: b.paid, balance: b.balance })))}>Export</Button>
+            <Button variant="secondary" icon={Download} onClick={() => downloadCSV('arena-bookings.csv', rows.map((b) => ({ date: b.booking_date, customer: b.customer_name, mobile: b.mobile, start: formatHour(b.start_hour), end: formatHour(b.end_hour), notes: b.details, total: b.total_amount, paid: b.paid, balance: b.balance })))}>Export</Button>
             <Button icon={Plus} onClick={() => setNewOpen(true)}>New Booking</Button>
           </>
         }
@@ -92,6 +94,9 @@ export default function ArenaPage() {
         empty={<EmptyState icon={Trophy} title="No bookings" description="Create a booking in a few seconds." action={<Button icon={Plus} onClick={() => setNewOpen(true)}>New Booking</Button>} />} />
       <BookingDrawer open={newOpen} onClose={() => setNewOpen(false)} />
       <CollectDrawer target={collect} onClose={() => setCollect(null)} />
+      <ConfirmDialog open={!!cancelling} onClose={() => setCancelling(null)} title="Cancel this booking?"
+        message={`${cancelling?.customer_name}, ${cancelling ? formatDate(cancelling.booking_date) : ''} ${cancelling ? formatHour(cancelling.start_hour) + ' – ' + formatHour(cancelling.end_hour) : ''}. The time slots become available again. Any payment already received stays in the ledger; mark it refunded in Payments if you return the money.`}
+        confirmLabel="Cancel booking" onConfirm={() => { cancelBooking(cancelling.id); toast.success('Booking cancelled. Slots released.'); setCancelling(null) }} />
     </>
   )
 }

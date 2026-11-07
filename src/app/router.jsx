@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AppShell from '@/components/layout/AppShell'
 import ProtectedRoute from '@/features/auth/ProtectedRoute'
 import LoginPage from '@/features/auth/LoginPage'
@@ -9,11 +9,22 @@ import StudentProfilePage from '@/features/students/StudentProfilePage'
 import PaymentsPage from '@/features/payments/PaymentsPage'
 import ReceiptPage from '@/features/payments/ReceiptPage'
 import ArenaPage from '@/features/arena/ArenaPage'
-import ExpensesPage from '@/features/expenses/ExpensesPage'
+import AccountsLayout from '@/features/accounts/AccountsLayout'
+import OverviewPage from '@/features/accounts/OverviewPage'
+import IncomePage from '@/features/accounts/IncomePage'
+import ExpensesPage from '@/features/accounts/ExpensesPage'
+import LedgerPage from '@/features/accounts/LedgerPage'
+import StatementsPage from '@/features/accounts/StatementsPage'
+import AuditPage from '@/features/accounts/AuditPage'
 import ReportsPage from '@/features/reports/ReportsPage'
 import SettingsPage from '@/features/settings/SettingsPage'
 import { Button, EmptyState } from '@/components/ui'
 import { Link } from 'react-router-dom'
+function ExpensesRedirect() {
+  const { search } = useLocation()
+  return <Navigate to={`/accounts/expenses${search}`} replace />
+}
+
 export default function AppRoutes() {
   return (
     <Routes>
@@ -30,7 +41,15 @@ export default function AppRoutes() {
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="payments/:id/receipt" element={<ReceiptPage />} />
           <Route path="arena" element={<ArenaPage />} />
-          <Route path="expenses" element={<ExpensesPage />} />
+          <Route path="accounts" element={<AccountsLayout />}>
+            <Route index element={<OverviewPage />} />
+            <Route path="income" element={<IncomePage />} />
+            <Route path="expenses" element={<ExpensesPage />} />
+            <Route path="ledger" element={<LedgerPage />} />
+            <Route path="statements" element={<StatementsPage />} />
+            <Route path="audit" element={<AuditPage />} />
+          </Route>
+          <Route path="expenses" element={<ExpensesRedirect />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route

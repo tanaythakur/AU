@@ -3,7 +3,7 @@ import { Printer } from 'lucide-react'
 import { Button, Card, EmptyState, PageHeader, StatusBadge } from '@/components/ui'
 import { methodLabel } from '@/data/mock'
 import { getBooking, getMembership, getPayment, getSettings, getStudent, payerName } from '@/services/store'
-import { formatDate, formatDateTime, formatINR } from '@/utils/format'
+import { formatDate, formatDateTime, formatHour, formatINR } from '@/utils/format'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 export default function ReceiptPage() {
@@ -16,7 +16,7 @@ export default function ReceiptPage() {
   const m = p.membership_id ? getMembership(p.membership_id) : null
   const b = p.arena_booking_id ? getBooking(p.arena_booking_id) : null
   const student = p.student_id ? getStudent(p.student_id) : null
-  const towards = m ? `${m.plan_name} membership (${formatDate(m.start_date)} – ${formatDate(m.end_date)})` : `Arena booking: ${b?.details} on ${formatDate(b?.booking_date)}`
+  const towards = m ? `${m.plan_name} membership (${formatDate(m.start_date)} – ${formatDate(m.end_date)})` : `Arena booking, ${formatDate(b?.booking_date)}, ${formatHour(b?.start_hour)} to ${formatHour(b?.end_hour)}`
 
   return (
     <>

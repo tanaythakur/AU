@@ -49,3 +49,9 @@ export function downloadCSV(filename, rows) {
 
 /** Today as YYYY-MM-DD in the browser's local time zone (toISOString would give the UTC date). */
 export const todayISO = () => format(new Date(), 'yyyy-MM-dd')
+
+/** 24h integer hour -> "6:00 AM" */
+export const formatHour = (h) => `${h % 12 || 12}:00 ${h % 24 < 12 ? 'AM' : 'PM'}`
+/** Slot card label: 6 -> "6–7 AM", 11 -> "11–12 PM" */
+export const slotLabel = (h) => `${h % 12 || 12}–${(h + 1) % 12 || 12} ${(h + 1) % 24 < 12 ? 'AM' : 'PM'}`
+export const formatDuration = (hours) => `${hours} Hour${hours === 1 ? '' : 's'}`
