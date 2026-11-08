@@ -1,64 +1,37 @@
 /*
- * Demo data layer. Business rules live here (not in components) so the whole
- * file can be swapped for Supabase calls later:
- *   - every function that mutates data  -> an insert/update/RPC
- *   - every selector                    -> a query / view
- * Payments, memberships and expenses are never overwritten; renewals create
- * new membership rows and refunds only flip a payment's status.
+ * Data services for the screens.
+ *  - READS are synchronous selectors over the collections filled by dataLoader.js (data/db.js arrays).
+ *  - WRITES go to Supabase (RPCs for anything that moves money or must be atomic; plain CRUD for simple records),
+ *    then refetch what changed, so the UI always shows what the database actually committed.
+ * Business rules (overpayment, slot overlap, immutability, audit) are enforced IN THE DATABASE; the checks in the
+ * UI are only for convenience. Payments, memberships and expenses history is never overwritten.
  */
-import { useSyncExternalStore } from 'react'
 import { addDays, addMonths, endOfMonth, format, isAfter, parseISO, startOfMonth, startOfYear, subMonths } from 'date-fns'
+import { supabase } from '@/lib/supabaseClient'
 import { formatDate, formatHour } from '@/utils/format'
 import {
-  BRAND, TODAY, bookings, daysLeft, expenses, incomeEntries, iso, membershipStatus, memberships, payments, plans, students,
-} from '@/data/mock'
+  TODAY, bookings, daysLeft, expenses, incomeEntries, iso, membershipStatus, memberships, payments, plans, students,
+} from '@/data/db'
 import { incomeRecords, totalsFor as accountingTotals } from './accounting'
+import { auditLog, friendlyError, getSettings, isAuthFailure, refresh, useStore } from './dataLoader'
 
+export { auditLog, getSettings, useStore }
 export const totalsFor = accountingTotals
 
-/* ---------------- subscription ---------------- */
-let version = 0
-const listeners = new Set()
-const notify = () => {
-  version += 1
-  listeners.forEach((l) => l())
+/** Unwrap a Supabase response or throw a friendly Error. */
+async function run(promise) {
+  let res
+  try { res = await promise } catch (e) { throw friendlyError(e) }
+  if (res.error) {
+    if (isAuthFailure(res.error)) await supabase.auth.signOut().catch(() => {}) // dead session: back to the login page
+    throw friendlyError(res.error)
+  }
+  return res.data
 }
-const subscribe = (l) => (listeners.add(l), () => listeners.delete(l))
-/** Call at the top of any component that reads data; returns a number to use as a memo dependency. */
-export const useStore = () => useSyncExternalStore(subscribe, () => version)
+const pad = (h) => String(h).padStart(2, '0')
+const timeOf = (h) => `${pad(h)}:00:00` // 24 -> '24:00:00' (valid, means midnight at the end of the day)
 
-/* ---------------- audit log (financial records) ---------------- */
-export const auditLog = []
-const actor = () => {
-  try { return JSON.parse(localStorage.getItem('cricket_admin_session') || '{}').email || 'admin' } catch { return 'admin' }
-}
-/** changes: {field: [before, after]} for edits; summary: short human text. */
-function audit(entity, entity_id, code, action, summary, changes) {
-  auditLog.unshift({ id: `a${auditLog.length + 1}`, at: format(new Date(), "yyyy-MM-dd'T'HH:mm:ss"), actor: actor(), entity, entity_id, code, action, summary, changes: changes || null })
-}
-export const logExport = (summary) => { audit('export', '-', '-', 'export', summary); notify() }
-const diff = (before, after, fields) => {
-  const c = {}
-  fields.forEach((f) => { if (String(before[f] ?? '') !== String(after[f] ?? '')) c[f] = [before[f] ?? '', after[f] ?? ''] })
-  return c
-}
-
-let uid = 1000
-const newId = (p) => `${p}${++uid}`
-
-/* ---------------- settings (academy profile + UPI id) ---------------- */
-const SETTINGS_KEY = 'cricket_settings'
-let settings = { name: BRAND.name, phone: '', address: 'Chhindwara, Madhya Pradesh', upi_id: '', hourly_rate: 500, open_hour: 6, close_hour: 22 }
-try {
-  settings = { ...settings, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }
-} catch { /* ignore */ }
-export const getSettings = () => settings
-export function updateSettings(patch) {
-  settings = { ...settings, ...patch }
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)) } catch { /* ignore */ }
-  notify()
-}
-
+/* ---------------- lookups & selectors ---------------- */
 /* ---------------- lookups ---------------- */
 export const getStudent = (id) => students.find((s) => s.id === id)
 export const getPlan = (id) => plans.find((p) => p.id === id)
@@ -126,74 +99,48 @@ export function suggestedStart(studentId) {
 /** Existing membership that overlaps a proposed start date, if any. */
 export const overlapFor = (studentId, startISO) => membershipsOf(studentId).find((m) => m.end_date >= startISO)
 
-/* ---------------- mutations ---------------- */
-const nowStamp = () => format(new Date(), "yyyy-MM-dd'T'HH:mm:ss")
-const nextReceipt = () => `RCP-${String(payments.length + 1).padStart(5, '0')}`
+/* ---------------- mutations (all async; each refetches what it changed) ---------------- */
+const payArgs = (pay) => ({ p_pay_amount: pay?.amount || 0, p_method: pay?.payment_method || null, p_reference: pay?.reference_number || null })
 
-export function addStudent({ full_name, mobile, gender, date_of_birth }) {
-  const s = { id: newId('s'), full_name: full_name.trim(), mobile: mobile.trim(), gender: gender || '', date_of_birth: date_of_birth || '', admission_date: iso(TODAY), status: 'active' }
-  students.unshift(s)
-  notify()
-  return s
-}
-export function updateStudent(id, patch) {
-  Object.assign(getStudent(id), patch)
-  notify()
+/** Student + first membership + first payment in ONE database transaction. Plan is optional. */
+export async function enrollStudent({ student, plan_id, start_date, payment }) {
+  const r = await run(supabase.rpc('enroll_student', {
+    p_full_name: student.full_name, p_mobile: student.mobile, p_gender: student.gender || null, p_date_of_birth: student.date_of_birth || null,
+    p_plan_id: plan_id || null, p_start_date: start_date || null, ...payArgs(payment),
+  }))
+  await refresh('students', 'memberships', 'payments', 'audit')
+  return { student: students.find((s) => s.id === r.student_id), membership: memberships.find((m) => m.id === r.membership_id), payment: payments.find((p) => p.id === r.payment_id) }
 }
 
-export function addMembership({ student_id, plan_id, start_date }) {
-  const plan = getPlan(plan_id)
-  const m = {
-    id: newId('m'), student_id, plan_id, plan_name: plan.name, duration_months: plan.duration_months,
-    start_date, end_date: endDateFor(start_date, plan.duration_months), amount: plan.standard_price, // price snapshot
-  }
-  memberships.push(m)
-  audit('membership', m.id, m.id, 'create', `${m.plan_name} ${m.start_date} to ${m.end_date}, ${m.amount}`)
-  notify()
-  return m
+/** New membership / renewal (always a NEW row) with an optional first payment, atomically. */
+export async function addMembership({ student_id, plan_id, start_date, payment }) {
+  const r = await run(supabase.rpc('add_membership', { p_student_id: student_id, p_plan_id: plan_id, p_start_date: start_date || null, ...payArgs(payment) }))
+  await refresh('memberships', 'payments', 'audit')
+  return { membership: memberships.find((m) => m.id === r.membership_id), payment: payments.find((p) => p.id === r.payment_id) }
 }
 
-/**
- * Creates a completed payment linked to its source. Callers must only call this
- * AFTER the admin has confirmed the money was received.
- */
-export function recordPayment({ student_id, membership_id, arena_booking_id, amount, payment_method, reference_number }) {
-  const amt = Number(amount)
-  if (!(amt > 0)) throw new Error('Enter an amount greater than zero.')
-  const balance = membership_id
-    ? enrichMembership(getMembership(membership_id)).balance
-    : enrichBooking(getBooking(arena_booking_id)).balance
-  if (amt > balance) throw new Error(`Amount is more than the balance due (₹${balance}).`)
-  const p = {
-    id: newId('p'), receipt_number: nextReceipt(), student_id, membership_id, arena_booking_id, amount: amt,
-    payment_date: nowStamp(), payment_method, reference_number: reference_number || '', status: 'completed',
-  }
-  payments.push(p)
-  audit('payment', p.id, p.receipt_number, 'create', `Received ${amt} by ${payment_method}`)
-  notify()
-  return p
-}
-export function refundPayment(id) {
-  const p = getPayment(id)
-  p.status = 'refunded'
-  p.refunded_at = nowStamp()
-  audit('payment', id, p.receipt_number, 'refund', `Refunded ${p.amount}`, { status: ['completed', 'refunded'] })
-  notify()
+/** Collect money against a membership OR a booking. Overpayment is rejected by the database. */
+export async function recordPayment({ membership_id, arena_booking_id, amount, payment_method, reference_number }) {
+  const r = await run(supabase.rpc('record_payment', {
+    p_membership_id: membership_id || null, p_arena_booking_id: arena_booking_id || null, p_amount: amount, p_method: payment_method, p_reference: reference_number || null,
+  }))
+  await refresh('payments', 'audit')
+  return payments.find((p) => p.id === r.payment_id)
 }
 
-/** Student + first membership + (optional) first payment in one go. */
-export function enrollStudent({ student, plan_id, start_date, payment }) {
-  const s = addStudent(student)
-  let m = null
-  let p = null
-  if (plan_id) {
-    m = addMembership({ student_id: s.id, plan_id, start_date })
-    if (payment?.amount > 0) p = recordPayment({ student_id: s.id, membership_id: m.id, ...payment })
-  }
-  return { student: s, membership: m, payment: p }
+export async function refundPayment(id) {
+  await run(supabase.rpc('refund_payment', { p_payment_id: id, p_reason: '' }))
+  await refresh('payments', 'audit')
 }
 
-/** Hours already taken on a date (cancelled bookings release their slots). */
+export async function updateStudent(id, patch) {
+  await run(supabase.from('students').update({
+    full_name: patch.full_name.trim(), mobile: patch.mobile.trim(), gender: patch.gender || null, date_of_birth: patch.date_of_birth || null,
+  }).eq('id', id))
+  await refresh('students', 'audit')
+}
+
+/** Hours already taken on a date. Display aid only: the database exclusion constraint is the real guard. */
 export const bookedHours = (dateISO) => {
   const taken = new Set()
   bookings.filter((b) => b.booking_date === dateISO && b.status !== 'cancelled').forEach((b) => {
@@ -201,114 +148,117 @@ export const bookedHours = (dateISO) => {
   })
   return taken
 }
-/** Half-open interval overlap: [s1,e1) and [s2,e2) overlap iff s1 < e2 and s2 < e1. */
-const overlaps = (s1, e1, s2, e2) => s1 < e2 && s2 < e1
 
-/**
- * Re-checks the slot at save time, inside the same synchronous step as the insert.
- * The real protection must live in the database (see supabase/migrations/0001_arena_slots.sql);
- * this mirrors it so the demo behaves the same way.
- */
-export function addBooking({ customer_name, mobile, booking_date, details, start_hour, end_hour, total_amount, advance }) {
-  if (!(end_hour > start_hour)) throw new Error('Pick at least one time slot.')
-  const clash = bookings.find((b) => b.booking_date === booking_date && b.status !== 'cancelled' && overlaps(start_hour, end_hour, b.start_hour, b.end_hour))
-  if (clash) throw new Error('One of these slots was just booked. Pick another time.')
-  const b = {
-    id: newId('b'), customer_name: customer_name.trim(), mobile: mobile.trim(), booking_date, details: (details || '').trim(),
-    start_hour, end_hour, total_amount: Number(total_amount), status: 'confirmed', created_at: iso(TODAY),
+/** Create a booking (+ customer link + advance payment) atomically. A clash returns "That time slot was just booked". */
+export async function addBooking({ customer_name, mobile, booking_date, details, start_hour, end_hour, total_amount, advance }) {
+  let r
+  try {
+    r = await run(supabase.rpc('create_arena_booking', {
+      p_customer_name: customer_name, p_mobile: mobile, p_booking_date: booking_date, p_start_time: timeOf(start_hour), p_end_time: timeOf(end_hour),
+      p_total: Number(total_amount), p_notes: details || '', p_advance: advance?.amount || 0, p_method: advance?.payment_method || null, p_reference: advance?.reference_number || null,
+    }))
+  } catch (e) {
+    await refresh('bookings').catch(() => {}) // someone else may have taken the slot: show the truth
+    throw e
   }
-  bookings.unshift(b)
-  audit('booking', b.id, b.id, 'create', `${customer_name} ${booking_date} ${start_hour}:00-${end_hour}:00, total ${b.total_amount}`)
-  let p = null
-  if (advance?.amount > 0) p = recordPayment({ arena_booking_id: b.id, ...advance })
-  else notify()
-  return { booking: b, payment: p }
-}
-export function cancelBooking(id) {
-  audit('booking', id, id, 'cancel', `Cancelled booking of ${getBooking(id).customer_name}`, { status: ['confirmed', 'cancelled'] })
-  getBooking(id).status = 'cancelled' // payments stay in the ledger; refund separately if money is returned
-  notify()
+  await refresh('bookings', 'payments', 'audit')
+  return { booking: bookings.find((b) => b.id === r.booking_id), payment: payments.find((p) => p.id === r.payment_id) }
 }
 
-const EXP_FIELDS = ['name', 'category', 'amount', 'expense_date', 'payment_method', 'vendor', 'reason', 'status', 'paid_date', 'quantity']
-export function saveExpense(data, id) {
+export async function cancelBooking(id) {
+  await run(supabase.rpc('cancel_arena_booking', { p_booking_id: id }))
+  await refresh('bookings', 'audit')
+}
+
+/* ---- expenses ---- */
+const BUCKET = 'expense-bills'
+const safeName = (n) => n.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-80)
+/** data.attachment: File (new upload) | {path,name} (keep) | null (none). */
+async function uploadBill(file) {
+  const path = `bills/${crypto.randomUUID()}__${safeName(file.name)}`
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file, { contentType: file.type, upsert: false })
+  if (error) throw friendlyError(error)
+  return path
+}
+export async function getAttachmentUrl(path) {
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60)
+  if (error) throw friendlyError(error)
+  return data.signedUrl
+}
+
+export async function saveExpense(data, id) {
   const status = data.status === 'pending' ? 'pending' : 'paid'
-  const clean = {
-    name: data.name.trim(), category: data.category, amount: Number(data.amount), expense_date: data.expense_date,
-    vendor: (data.vendor || '').trim(), reason: (data.reason || '').trim(), quantity: data.quantity ? Number(data.quantity) : null,
-    status, payment_method: status === 'paid' ? data.payment_method || 'cash' : '', paid_date: status === 'paid' ? data.paid_date || data.expense_date : null,
+  const amount = Number(data.amount)
+  if (!(amount > 0)) throw new Error('Amount must be more than zero.')
+  let attachment_path = null
+  let uploaded = null
+  if (data.attachment instanceof File) attachment_path = uploaded = await uploadBill(data.attachment)
+  else if (data.attachment?.path) attachment_path = data.attachment.path
+  const row = {
+    title: data.name.trim(), category: data.category, amount, expense_date: data.expense_date, vendor: (data.vendor || '').trim(),
+    description: (data.reason || '').trim(), quantity: data.quantity ? Number(data.quantity) : null, status,
+    payment_method: status === 'paid' ? data.payment_method || 'cash' : null, paid_date: status === 'paid' ? data.paid_date || data.expense_date : null,
+    attachment_path,
   }
-  if (!(clean.amount > 0)) throw new Error('Amount must be more than zero.')
-  if (id) {
-    const e = expenses.find((x) => x.id === id)
-    const changes = diff(e, clean, EXP_FIELDS)
-    Object.assign(e, clean)
-    if (data.attachment !== undefined) {
-      if (e.attachment?.name !== data.attachment?.name) changes.attachment = [e.attachment?.name || '', data.attachment?.name || '']
-      e.attachment = data.attachment
-    }
-    audit('expense', id, e.code, 'update', `Edited ${e.name}`, changes)
-  } else {
-    const e = { id: newId('e'), code: `EXP-${String(expenses.length + 1).padStart(5, '0')}`, ...clean, attachment: data.attachment || null }
-    expenses.unshift(e)
-    audit('expense', e.id, e.code, 'create', `${e.name} ${e.amount} (${e.category}, ${e.status})`)
+  try {
+    await run(id ? supabase.from('expenses').update(row).eq('id', id) : supabase.from('expenses').insert(row))
+  } catch (e) {
+    if (uploaded) await supabase.storage.from(BUCKET).remove([uploaded]).catch(() => {}) // don't leave an orphan file
+    throw e
   }
-  expenses.sort((a, b) => b.expense_date.localeCompare(a.expense_date))
-  notify()
+  await refresh('expenses', 'audit')
 }
-export function markExpensePaid(id, method = 'cash') {
-  const e = expenses.find((x) => x.id === id)
-  const changes = { status: ['pending', 'paid'], paid_date: ['', iso(TODAY)], payment_method: ['', method] }
-  Object.assign(e, { status: 'paid', paid_date: iso(TODAY), payment_method: method })
-  audit('expense', id, e.code, 'update', `Marked paid: ${e.name}`, changes)
-  notify()
+export async function markExpensePaid(id, method = 'cash') {
+  await run(supabase.from('expenses').update({ status: 'paid', paid_date: iso(TODAY), payment_method: method }).eq('id', id))
+  await refresh('expenses', 'audit')
 }
-export function deleteExpense(id) {
-  const i = expenses.findIndex((x) => x.id === id)
-  const [e] = expenses.splice(i, 1)
-  audit('expense', id, e.code, 'delete', `Deleted ${e.name} ${e.amount}`, { snapshot: [JSON.stringify({ ...e, attachment: e.attachment?.name || null }), ''] })
-  notify()
+/** The bill file is kept (it is evidence); the deletion itself is recorded in the audit log with a full snapshot. */
+export async function deleteExpense(id) {
+  await run(supabase.from('expenses').delete().eq('id', id))
+  await refresh('expenses', 'audit')
 }
 
-const INC_FIELDS = ['title', 'category', 'amount', 'income_date', 'payment_method', 'status', 'description', 'reference', 'received_date']
-export function saveIncome(data, id) {
+/* ---- other income ---- */
+export async function saveIncome(data, id) {
   const status = ['paid', 'pending', 'cancelled'].includes(data.status) ? data.status : 'paid'
-  const clean = {
-    title: data.title.trim(), category: data.category, amount: Number(data.amount), income_date: data.income_date, status,
-    payment_method: status === 'paid' ? data.payment_method || 'cash' : data.payment_method || '', description: (data.description || '').trim(), reference: (data.reference || '').trim(),
+  const amount = Number(data.amount)
+  if (!(amount > 0)) throw new Error('Amount must be more than zero.')
+  const row = {
+    title: data.title.trim(), category: data.category, amount, income_date: data.income_date, status,
+    payment_method: status === 'paid' ? data.payment_method || 'cash' : data.payment_method || null,
     received_date: status === 'paid' ? data.received_date || data.income_date : null,
+    description: (data.description || '').trim(), reference: (data.reference || '').trim(),
   }
-  if (!(clean.amount > 0)) throw new Error('Amount must be more than zero.')
-  if (id) {
-    const i = incomeEntries.find((x) => x.id === id)
-    audit('income', id, i.code, 'update', `Edited ${i.title}`, diff(i, clean, INC_FIELDS))
-    Object.assign(i, clean)
-  } else {
-    const i = { id: newId('i'), code: `INC-${String(incomeEntries.length + 1).padStart(5, '0')}`, ...clean }
-    incomeEntries.unshift(i)
-    audit('income', i.id, i.code, 'create', `${i.title} ${i.amount} (${i.category}, ${i.status})`)
-  }
-  notify()
+  await run(id ? supabase.from('income_entries').update(row).eq('id', id) : supabase.from('income_entries').insert(row))
+  await refresh('income', 'audit')
 }
-export function markIncomeReceived(id, method = 'cash') {
-  const i = incomeEntries.find((x) => x.id === id)
-  const changes = { status: [i.status, 'paid'], received_date: ['', iso(TODAY)] }
-  Object.assign(i, { status: 'paid', received_date: iso(TODAY), payment_method: method })
-  audit('income', id, i.code, 'update', `Marked received: ${i.title}`, changes)
-  notify()
+export async function markIncomeReceived(id, method = 'cash') {
+  await run(supabase.from('income_entries').update({ status: 'paid', received_date: iso(TODAY), payment_method: method }).eq('id', id))
+  await refresh('income', 'audit')
 }
-export function deleteIncome(id) {
-  const k = incomeEntries.findIndex((x) => x.id === id)
-  const [i] = incomeEntries.splice(k, 1)
-  audit('income', id, i.code, 'delete', `Deleted ${i.title} ${i.amount}`, { snapshot: [JSON.stringify(i), ''] })
-  notify()
+export async function deleteIncome(id) {
+  await run(supabase.from('income_entries').delete().eq('id', id))
+  await refresh('income', 'audit')
 }
 
-export function savePlan(data, id) {
-  const clean = { name: data.name.trim(), duration_months: Number(data.duration_months), standard_price: Number(data.standard_price), description: data.description || '', is_active: !!data.is_active }
-  if (id) Object.assign(getPlan(id), clean)
-  else plans.push({ id: newId('plan-'), ...clean })
-  notify()
+/* ---- plans & settings ---- */
+export async function savePlan(data, id) {
+  const row = { name: data.name.trim(), duration_months: Number(data.duration_months), price: Number(data.standard_price), description: data.description || '', is_active: !!data.is_active }
+  await run(id ? supabase.from('membership_plans').update(row).eq('id', id) : supabase.from('membership_plans').insert(row))
+  await refresh('plans', 'audit')
+}
+export async function updateSettings(patch) {
+  await run(supabase.from('academy_settings').update({
+    name: patch.name, phone: patch.phone || '', address: patch.address || '', upi_id: (patch.upi_id || '').trim(),
+    hourly_rate: Number(patch.hourly_rate), open_hour: Number(patch.open_hour), close_hour: Number(patch.close_hour),
+  }).eq('id', true))
+  await refresh('settings', 'audit')
+}
+
+/** Record an Excel export in the audit log (server-side). */
+export async function logExport(summary) {
+  await run(supabase.rpc('log_export', { p_summary: summary }))
+  await refresh('audit')
 }
 
 /* ---------------- periods & aggregates ---------------- */

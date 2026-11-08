@@ -5,18 +5,18 @@ import { Coins, Download, Eye, HandCoins, Pencil, Plus, Trash2, Wallet } from 'l
 import {
   Button, ConfirmDialog, DataTable, EmptyState, FilterBar, FilterSelect, FormField, IconButton, Input, Modal, SearchInput, Select, StatCard, StatusBadge, Textarea, useToast,
 } from '@/components/ui'
-import { INCOME_CATEGORIES, PAYMENT_METHODS } from '@/data/mock'
+import { INCOME_CATEGORIES, PAYMENT_METHODS } from '@/data/db'
 import { incomeRecords } from '@/services/accounting'
 import { deleteIncome, markIncomeReceived, saveIncome, useStore } from '@/services/store'
 import { downloadCSV, formatDate, formatINR, todayISO } from '@/utils/format'
-import { useSimulatedLoading } from '@/hooks/useSimulatedLoading'
+import { usePageLoading } from '@/hooks/usePageLoading'
 
 const CATS = ['Student fees', 'Arena bookings', ...INCOME_CATEGORIES]
 
 export default function IncomePage() {
   const v = useStore()
   const { range } = useOutletContext()
-  const loading = useSimulatedLoading(300)
+  const loading = usePageLoading()
   const toast = useToast()
   const [params, setParams] = useSearchParams()
   const [q, setQ] = useState('')
@@ -53,7 +53,7 @@ export default function IncomePage() {
         <div className="flex items-center justify-end gap-0.5">
           <IconButton icon={Eye} label="View" size="sm" onClick={() => setViewing(x)} />
           {x.kind === 'manual' && <>
-            {x.status === 'pending' && <Button size="sm" variant="secondary" onClick={() => { markIncomeReceived(x.id); toast.success('Marked as received.') }}>Received</Button>}
+            {x.status === 'pending' && <Button size="sm" variant="secondary" onClick={async () => { try { await markIncomeReceived(x.id); toast.success('Marked as received.') } catch (e) { toast.error(e.message) } }}>Received</Button>}
             <IconButton icon={Pencil} label="Edit" size="sm" onClick={() => setEditing(x.raw)} />
             <IconButton icon={Trash2} label="Delete" size="sm" onClick={() => setDeleting(x)} />
           </>}
@@ -97,7 +97,7 @@ export default function IncomePage() {
       </Modal>
       <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} title="Delete this income entry?"
         message={`${deleting?.title} (${formatINR(deleting?.amount)}) will be removed from reports. The deletion is recorded in the audit log.`} confirmLabel="Delete"
-        onConfirm={() => { deleteIncome(deleting.id); toast.success('Income entry deleted.'); setDeleting(null) }} />
+        onConfirm={async () => { try { await deleteIncome(deleting.id); toast.success('Income entry deleted.'); setDeleting(null) } catch (e) { toast.error(e.message) } }} />
     </>
   )
 }
@@ -110,8 +110,7 @@ function IncomeModal({ entry, onClose }) {
   const status = watch('status')
   const save = async (d) => {
     try {
-      await new Promise((r) => setTimeout(r, 250))
-      saveIncome(d, entry?.id)
+      await saveIncome(d, entry?.id)
       toast.success(entry ? 'Income updated.' : 'Income added.')
       onClose()
     } catch (e) { toast.error(e.message) }

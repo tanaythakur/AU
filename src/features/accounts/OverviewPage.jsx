@@ -7,12 +7,12 @@ import { CHART, ChartLegend, ChartTooltip, axisProps, currencyAxis } from '@/com
 import { expenseRecords, financialSummary, group, incomeRecords, periodSeries } from '@/services/accounting'
 import { useStore } from '@/services/store'
 import { formatDate, formatINR } from '@/utils/format'
-import { useSimulatedLoading } from '@/hooks/useSimulatedLoading'
+import { usePageLoading } from '@/hooks/usePageLoading'
 
 export default function OverviewPage() {
   const v = useStore()
   const { range } = useOutletContext()
-  const loading = useSimulatedLoading(300)
+  const loading = usePageLoading()
   const d = useMemo(() => {
     const exp = expenseRecords(range)
     return {

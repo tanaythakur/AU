@@ -1,5 +1,5 @@
 /*
- * Accounting engine. Pure functions over the records in data/mock.js (swap for Supabase queries/views later).
+ * Accounting engine. Pure functions over the live records in data/db.js (filled from Supabase by dataLoader.js).
  * Every dashboard card, report and Excel sheet is built from these functions, so they always reconcile.
  *
  * Basis of accounting
@@ -16,7 +16,7 @@
 import {
   addMonths, endOfMonth, endOfQuarter, endOfWeek, endOfYear, format, parseISO, startOfMonth, startOfQuarter, startOfWeek, startOfYear,
 } from 'date-fns'
-import { bookings, expenses, incomeEntries, isCogs, memberships, payments, students, TODAY, iso } from '@/data/mock'
+import { bookings, expenses, incomeEntries, isCogs, memberships, payments, students, TODAY, iso } from '@/data/db'
 
 /* ---------------- date ranges ---------------- */
 export const ACCOUNT_PERIODS = [
@@ -46,7 +46,7 @@ export const rangeLabel = (r) => (r ? `${format(parseISO(r[0]), 'dd MMM yyyy')} 
 const round = (n) => Math.round((Number(n) || 0) * 100) / 100
 const sum = (list, f) => round(list.reduce((t, x) => t + f(x), 0))
 const completedFor = (key, id) => payments.filter((p) => p[key] === id && p.status === 'completed')
-const lastMethod = (list) => [...list].sort((a, b) => b.payment_date.localeCompare(a.payment_date))[0]?.payment_method || ''
+const lastMethod = (list) => [...list].sort((a, b) => b.payment_date.localeCompare(a.payment_date) || b.receipt_number.localeCompare(a.receipt_number))[0]?.payment_method || ''
 const statusOf = (amount, received) => (received >= amount ? 'paid' : received > 0 ? 'partial' : 'pending')
 
 /* ---------------- income records (accrual) ---------------- */
@@ -61,7 +61,7 @@ export function incomeRecords(r) {
     const received = Math.min(sum(paid, (p) => p.amount), m.amount)
     const student = students.find((s) => s.id === m.student_id)
     out.push({
-      id: m.id, kind: 'membership', code: `MEM-${m.id.replace(/\D/g, '').padStart(5, '0')}`, title: `${m.plan_name} membership – ${student?.full_name || ''}`,
+      id: m.id, kind: 'membership', code: `MEM-${m.id.slice(0, 8).toUpperCase()}`, title: `${m.plan_name} membership – ${student?.full_name || ''}`,
       category: 'Student fees', amount: m.amount, received, balance: round(m.amount - received), date: m.start_date,
       method: lastMethod(paid), status: statusOf(m.amount, received), description: `${m.start_date} to ${m.end_date}`, reference: m.id, student_id: m.student_id,
     })
@@ -73,7 +73,7 @@ export function incomeRecords(r) {
     if (b.status === 'cancelled') {
       if (got <= 0) return // nothing retained, nothing to record
       out.push({
-        id: b.id, kind: 'arena', code: `ARN-${b.id.replace(/\D/g, '').padStart(5, '0')}`, title: `Arena booking – ${b.customer_name} (cancelled, payment retained)`,
+        id: b.id, kind: 'arena', code: `ARN-${b.id.slice(0, 8).toUpperCase()}`, title: `Arena booking – ${b.customer_name} (cancelled, payment retained)`,
         category: 'Arena bookings', amount: got, received: got, balance: 0, date: b.booking_date, method: lastMethod(paid), status: 'paid',
         description: `Cancelled booking ${b.booking_date} ${hours}`, reference: b.id,
       })
@@ -81,7 +81,7 @@ export function incomeRecords(r) {
     }
     const received = Math.min(got, b.total_amount)
     out.push({
-      id: b.id, kind: 'arena', code: `ARN-${b.id.replace(/\D/g, '').padStart(5, '0')}`, title: `Arena booking – ${b.customer_name}`, category: 'Arena bookings',
+      id: b.id, kind: 'arena', code: `ARN-${b.id.slice(0, 8).toUpperCase()}`, title: `Arena booking – ${b.customer_name}`, category: 'Arena bookings',
       amount: b.total_amount, received, balance: round(b.total_amount - received), date: b.booking_date, method: lastMethod(paid),
       status: statusOf(b.total_amount, received), description: `${b.booking_date} ${hours}`, reference: b.id,
     })
@@ -114,16 +114,17 @@ const whoFor = (p) =>
 /** All settled cash movements (unfiltered), oldest first. */
 function allCashEntries() {
   const e = []
-  payments.forEach((p) => {
+  // Only confirmed money counts as cash: 'pending' and 'failed' payments (future gateway) are never cash.
+  payments.filter((p) => p.status === 'completed' || p.status === 'refunded').forEach((p) => {
     // status completed OR refunded: the money did come in on payment_date
-    e.push({ at: p.payment_date, tx: p.receipt_number, description: `${p.student_id ? 'Fee' : 'Arena'} payment – ${whoFor(p)}`, income: p.amount, expense: 0, method: methodOf(p.payment_method), type: 'payment' })
+    e.push({ at: p.payment_date, tx: p.receipt_number, description: `${p.student_id ? 'Fee' : 'Arena'} payment – ${whoFor(p)}`, income: p.amount, expense: 0, method: methodOf(p.payment_method), method_code: p.payment_method, type: 'payment' })
     if (p.status === 'refunded')
-      e.push({ at: p.refunded_at || p.payment_date, tx: `${p.receipt_number}-R`, description: `Refund – ${whoFor(p)}`, income: 0, expense: p.amount, method: methodOf(p.payment_method), type: 'refund' })
+      e.push({ at: p.refunded_at || p.payment_date, tx: `${p.receipt_number}-R`, description: `Refund – ${whoFor(p)}`, income: 0, expense: p.amount, method: methodOf(p.payment_method), method_code: p.payment_method, type: 'refund' })
   })
   incomeEntries.filter((i) => i.status === 'paid').forEach((i) =>
-    e.push({ at: `${i.received_date || i.income_date}T12:00:00`, tx: i.code, description: i.title, income: i.amount, expense: 0, method: methodOf(i.payment_method), type: 'income' }))
+    e.push({ at: `${i.received_date || i.income_date}T12:00:00`, tx: i.code, description: i.title, income: i.amount, expense: 0, method: methodOf(i.payment_method), method_code: i.payment_method, type: 'income' }))
   expenses.filter((x) => x.status === 'paid').forEach((x) =>
-    e.push({ at: `${x.paid_date || x.expense_date}T12:00:00`, tx: x.code, description: `${x.name}${x.vendor ? ` – ${x.vendor}` : ''}`, income: 0, expense: x.amount, method: methodOf(x.payment_method), type: 'expense' }))
+    e.push({ at: `${x.paid_date || x.expense_date}T12:00:00`, tx: x.code, description: `${x.name}${x.vendor ? ` – ${x.vendor}` : ''}`, income: 0, expense: x.amount, method: methodOf(x.payment_method), method_code: x.payment_method, type: 'expense' }))
   return e.sort((a, b) => a.at.localeCompare(b.at) || a.tx.localeCompare(b.tx))
 }
 
@@ -200,7 +201,8 @@ export function periodSeries(r, granularity = 'month') {
     ...expenses.map((e) => e.expense_date), ...payments.map((p) => p.payment_date.slice(0, 10)),
   ].sort()
   const from = parseISO(r ? r[0] : firstDates[0] || iso(TODAY))
-  const to = parseISO(r ? r[1] : iso(TODAY))
+  // all-time must also cover future-dated records (e.g. a booking made for next month), or the buckets would not add up
+  const to = parseISO(r ? r[1] : [iso(TODAY), ...firstDates].sort().pop())
   const start = { month: startOfMonth, quarter: startOfQuarter, year: startOfYear }[granularity]
   const end = { month: endOfMonth, quarter: endOfQuarter, year: endOfYear }[granularity]
   const step = { month: 1, quarter: 3, year: 12 }[granularity]

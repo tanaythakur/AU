@@ -32,14 +32,13 @@ export default function StudentFormPage() {
   const onSubmit = async (data) => {
     setSaving(true)
     try {
-      await new Promise((r) => setTimeout(r, 350)) // demo latency
       if (editing) {
-        updateStudent(id, data)
+        await updateStudent(id, data)
         toast.success('Student updated.')
         navigate(`/students/${id}`)
         return
       }
-      const res = enrollStudent({ student: data, plan_id: planId, start_date: start, payment: pay.payload })
+      const res = await enrollStudent({ student: data, plan_id: planId, start_date: start, payment: pay.payload })
       const due = plan ? plan.standard_price - (res.payment?.amount || 0) : 0
       toast.success(plan ? (due > 0 ? `${data.full_name} added. Balance due ${formatINR(due)}.` : `${data.full_name} added and fully paid.`) : `${data.full_name} added.`)
       navigate(`/students/${res.student.id}`)

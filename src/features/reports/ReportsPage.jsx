@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
 import { Download, IndianRupee, PiggyBank, TrendingDown } from 'lucide-react'
 import { Button, Card, CardHeader, ChartCard, DataTable, EmptyState, FilterBar, FilterSelect, PageHeader, StatCard, Tabs } from '@/components/ui'
 import { CHART, ChartLegend, ChartTooltip, axisProps, currencyAxis } from '@/components/common/charts'
-import { PERIOD_OPTIONS, expenses, methodLabel } from '@/data/mock'
+import { PERIOD_OPTIONS, expenses, methodLabel } from '@/data/db'
 import { admissionsSeries, collectionsByMethod, collectionsBySource, expenseBreakdown, inRange, monthlySeries, pendingTotals, periodRange, totalsFor, useStore } from '@/services/store'
 import { downloadCSV, formatDate, formatINR } from '@/utils/format'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'

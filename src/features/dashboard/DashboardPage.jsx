@@ -4,17 +4,17 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { CalendarClock, GraduationCap, IndianRupee, PiggyBank, Plus, TrendingDown, Trophy, UserPlus, Users, Wallet } from 'lucide-react'
 import { Button, Card, CardHeader, ChartCard, PageHeader, StatCard } from '@/components/ui'
 import { CHART, ChartLegend, ChartTooltip, axisProps, currencyAxis } from '@/components/common/charts'
-import { bookings, expenses, payments, students } from '@/data/mock'
+import { bookings, expenses, payments, students } from '@/data/db'
 import { enrichBooking, monthlySeries, payerName, paymentType, pendingTotals, periodRange, studentRow, totalsFor, useStore } from '@/services/store'
 import { formatDate, formatINR } from '@/utils/format'
-import { useSimulatedLoading } from '@/hooks/useSimulatedLoading'
+import { usePageLoading } from '@/hooks/usePageLoading'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import MembershipDrawer from '@/features/students/MembershipDrawer'
 
 export default function DashboardPage() {
   useDocumentTitle('Dashboard')
   const v = useStore()
-  const loading = useSimulatedLoading()
+  const loading = usePageLoading()
   const [renewFor, setRenewFor] = useState(null)
 
   const d = useMemo(() => {

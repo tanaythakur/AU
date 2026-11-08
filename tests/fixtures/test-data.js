@@ -1,7 +1,7 @@
 /*
- * Fictional sample data for the UI build. Replace with Supabase queries later
- * (see src/services). All names, numbers and contacts are made up.
- * These arrays are mutated by src/services/store.js so the demo flows work.
+ * TEST DATA ONLY (never imported by the app, never bundled). A deterministic generator of students, memberships,
+ * payments, bookings, expenses and income used to load a realistic dataset into a throw-away local PostgreSQL
+ * for the reconciliation tests. All names, numbers and contacts are made up.
  */
 import { addDays, addMonths, format, parseISO, startOfDay, differenceInCalendarDays } from 'date-fns'
 

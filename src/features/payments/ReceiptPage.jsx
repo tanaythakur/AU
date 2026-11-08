@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom'
 import { Printer } from 'lucide-react'
 import { Button, Card, EmptyState, PageHeader, StatusBadge } from '@/components/ui'
-import { methodLabel } from '@/data/mock'
+import { methodLabel } from '@/data/db'
 import { getBooking, getMembership, getPayment, getSettings, getStudent, payerName } from '@/services/store'
 import { formatDate, formatDateTime, formatHour, formatINR } from '@/utils/format'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'

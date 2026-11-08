@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Download, IndianRupee, Pencil, Plus, RefreshCw, Users } from 'lucide-react'
 import { Button, DataTable, EmptyState, FilterBar, IconButton, PageHeader, SearchInput, StatusBadge } from '@/components/ui'
-import { students } from '@/data/mock'
+import { students } from '@/data/db'
 import { studentRow, useStore } from '@/services/store'
 import { downloadCSV, formatDate, formatINR } from '@/utils/format'
 import { cn } from '@/utils/cn'
-import { useSimulatedLoading } from '@/hooks/useSimulatedLoading'
+import { usePageLoading } from '@/hooks/usePageLoading'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import MembershipDrawer from './MembershipDrawer'
 import CollectDrawer from '@/features/payments/CollectDrawer'
@@ -23,7 +23,7 @@ export default function StudentsPage() {
   useDocumentTitle('Students')
   const v = useStore()
   const navigate = useNavigate()
-  const loading = useSimulatedLoading()
+  const loading = usePageLoading()
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
   const [membershipFor, setMembershipFor] = useState(null) // {studentId, renew} | {new:true}

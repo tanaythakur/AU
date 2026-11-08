@@ -3,12 +3,12 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Download, IndianRupee, MessageCircle, Plus, Trophy, X } from 'lucide-react'
 import { Button, ConfirmDialog, DataTable, EmptyState, FilterBar, PageHeader, SearchInput, StatCard, StatusBadge, useToast } from '@/components/ui'
-import { bookings } from '@/data/mock'
+import { bookings } from '@/data/db'
 import { cancelBooking, enrichBooking, useStore } from '@/services/store'
 import { downloadCSV, formatDate, formatHour, formatINR } from '@/utils/format'
 import { bookingWhatsApp } from './whatsapp'
 import { cn } from '@/utils/cn'
-import { useSimulatedLoading } from '@/hooks/useSimulatedLoading'
+import { usePageLoading } from '@/hooks/usePageLoading'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import BookingDrawer from './BookingDrawer'
 import CollectDrawer from '@/features/payments/CollectDrawer'
@@ -19,7 +19,7 @@ export default function ArenaPage() {
   useDocumentTitle('Arena Bookings')
   const v = useStore()
   const toast = useToast()
-  const loading = useSimulatedLoading()
+  const loading = usePageLoading()
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')
   const [params, setParams] = useSearchParams()
@@ -96,7 +96,7 @@ export default function ArenaPage() {
       <CollectDrawer target={collect} onClose={() => setCollect(null)} />
       <ConfirmDialog open={!!cancelling} onClose={() => setCancelling(null)} title="Cancel this booking?"
         message={`${cancelling?.customer_name}, ${cancelling ? formatDate(cancelling.booking_date) : ''} ${cancelling ? formatHour(cancelling.start_hour) + ' – ' + formatHour(cancelling.end_hour) : ''}. The time slots become available again. Any payment already received stays in the ledger; mark it refunded in Payments if you return the money.`}
-        confirmLabel="Cancel booking" onConfirm={() => { cancelBooking(cancelling.id); toast.success('Booking cancelled. Slots released.'); setCancelling(null) }} />
+        confirmLabel="Cancel booking" onConfirm={async () => { try { await cancelBooking(cancelling.id); toast.success('Booking cancelled. Slots released.'); setCancelling(null) } catch (e) { toast.error(e.message) } }} />
     </>
   )
 }

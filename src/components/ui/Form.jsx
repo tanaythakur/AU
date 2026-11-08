@@ -1,7 +1,7 @@
 import { createContext, useContext, useId } from 'react'
 import { ChevronDown, Search, X } from 'lucide-react'
 import { cn } from '@/utils/cn'
-import { PERIOD_OPTIONS } from '@/data/mock'
+import { PERIOD_OPTIONS } from '@/data/db'
 
 const control =
   'h-10 w-full rounded-md border bg-surface px-3 text-body text-text-primary shadow-sm transition-colors placeholder:text-text-tertiary ' +

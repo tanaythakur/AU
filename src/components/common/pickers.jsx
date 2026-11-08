@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Check, Search, X } from 'lucide-react'
-import { plans } from '@/data/mock'
-import { students } from '@/data/mock'
+import { plans } from '@/data/db'
+import { students } from '@/data/db'
 import { formatINR } from '@/utils/format'
 import { cn } from '@/utils/cn'
 

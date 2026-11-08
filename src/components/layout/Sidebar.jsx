@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { Calculator, ChartColumn, IndianRupee, LayoutDashboard, LogOut, Settings, Trophy, Users, X } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import { initials } from '@/utils/format'
-import { BRAND } from '@/data/mock'
+import { BRAND } from '@/data/db'
 import { useAuth } from '@/features/auth/AuthContext'
 
 export const NAV_ITEMS = [

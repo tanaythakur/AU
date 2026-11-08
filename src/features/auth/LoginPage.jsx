@@ -3,13 +3,13 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { Eye, EyeOff } from 'lucide-react'
 import { Button, FormField, InlineAlert, Input, useToast } from '@/components/ui'
-import { BRAND } from '@/data/mock'
+import { BRAND } from '@/data/db'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useAuth } from './AuthContext'
 
 export default function LoginPage() {
   useDocumentTitle('Sign in')
-  const { user, signIn } = useAuth()
+  const { user, signIn, notice } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const toast = useToast()
@@ -21,12 +21,12 @@ export default function LoginPage() {
 
   const onSubmit = async ({ email, password }) => {
     setAuthError('')
-    if (password.length < 6) {
-      setAuthError('Invalid email or password. Please check and try again.')
-      return
+    try {
+      await signIn(email, password)
+      navigate(location.state?.from || '/', { replace: true })
+    } catch (e) {
+      setAuthError(e.message)
     }
-    await signIn(email)
-    navigate(location.state?.from || '/', { replace: true })
   }
 
   return (
@@ -42,6 +42,7 @@ export default function LoginPage() {
           <p className="mt-1 text-body-sm text-text-secondary">Sign in to the admin dashboard.</p>
 
           {authError && <InlineAlert tone="danger" className="mt-4">{authError}</InlineAlert>}
+          {!authError && notice && <InlineAlert tone="warning" className="mt-4">{notice}</InlineAlert>}
 
           <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4" noValidate>
             <FormField label="Email" htmlFor="email" required error={errors.email?.message}>
@@ -71,14 +72,14 @@ export default function LoginPage() {
               </div>
             </FormField>
             <div className="flex justify-end">
-              <button type="button" onClick={() => toast.info('Password reset will be available once Supabase Auth is connected.')} className="text-body-sm font-medium text-primary hover:text-primary-hover">
+              <button type="button" onClick={() => toast.info('To change the admin password, open your Supabase dashboard → Authentication → Users and reset it there.')} className="text-body-sm font-medium text-primary hover:text-primary-hover">
                 Forgot password?
               </button>
             </div>
             <Button type="submit" className="w-full" size="lg" loading={isSubmitting}>Sign in</Button>
           </form>
         </div>
-        <p className="mt-6 text-center text-caption text-text-secondary">Authorised administrator access only. Demo mode: any email with a 6+ character password.</p>
+        <p className="mt-6 text-center text-caption text-text-secondary">Authorised administrator access only.</p>
       </div>
     </div>
   )

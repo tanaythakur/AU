@@ -5,11 +5,11 @@ import { Banknote, Download, Eye, HandCoins, Paperclip, Pencil, Plus, Receipt, T
 import {
   Button, ConfirmDialog, DataTable, EmptyState, FilterBar, FilterSelect, FormField, IconButton, Input, Modal, SearchInput, Select, StatCard, StatusBadge, Textarea, useToast,
 } from '@/components/ui'
-import { EXPENSE_CATEGORIES, PAYMENT_METHODS } from '@/data/mock'
+import { EXPENSE_CATEGORIES, PAYMENT_METHODS } from '@/data/db'
 import { expenseRecords } from '@/services/accounting'
-import { deleteExpense, saveExpense, useStore } from '@/services/store'
+import { deleteExpense, getAttachmentUrl, saveExpense, useStore } from '@/services/store'
 import { downloadCSV, formatDate, formatINR, todayISO } from '@/utils/format'
-import { useSimulatedLoading } from '@/hooks/useSimulatedLoading'
+import { usePageLoading } from '@/hooks/usePageLoading'
 
 const MAX_FILE = 2 * 1024 * 1024
 const methodName = (m) => PAYMENT_METHODS.find((x) => x.value === m)?.label || '—'
@@ -17,7 +17,7 @@ const methodName = (m) => PAYMENT_METHODS.find((x) => x.value === m)?.label || '
 export default function ExpensesPage() {
   const v = useStore()
   const { range } = useOutletContext()
-  const loading = useSimulatedLoading(300)
+  const loading = usePageLoading()
   const toast = useToast()
   const [params, setParams] = useSearchParams()
   const [q, setQ] = useState('')
@@ -88,13 +88,13 @@ export default function ExpensesPage() {
           <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-body">
             {[['Category', viewing.category], ['Amount', formatINR(viewing.amount)], ['Date', formatDate(viewing.expense_date)], ['Status', <StatusBadge key="s" status={viewing.status} />], ['Method', methodName(viewing.payment_method)], ['Paid on', formatDate(viewing.paid_date)], ['Vendor / payee', viewing.vendor || '—'], ['Quantity', viewing.quantity || '—']].map(([k, val]) => <div key={k}><dt className="text-caption text-text-secondary">{k}</dt><dd>{val}</dd></div>)}
             <div className="col-span-2"><dt className="text-caption text-text-secondary">Description</dt><dd>{viewing.reason || '—'}</dd></div>
-            <div className="col-span-2"><dt className="text-caption text-text-secondary">Bill / receipt</dt><dd>{viewing.attachment ? <a href={viewing.attachment.url} download={viewing.attachment.name} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{viewing.attachment.name}</a> : '—'}</dd></div>
+            <div className="col-span-2"><dt className="text-caption text-text-secondary">Bill / receipt</dt><dd>{viewing.attachment ? <AttachmentLink attachment={viewing.attachment} /> : '—'}</dd></div>
           </dl>
         )}
       </Modal>
       <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} title="Delete this expense?"
         message={`${deleting?.name} (${formatINR(deleting?.amount)}) will be removed from reports and the ledger. The deletion is recorded in the audit log.`} confirmLabel="Delete"
-        onConfirm={() => { deleteExpense(deleting.id); toast.success('Expense deleted.'); setDeleting(null) }} />
+        onConfirm={async () => { try { await deleteExpense(deleting.id); toast.success('Expense deleted.'); setDeleting(null) } catch (e) { toast.error(e.message) } }} />
     </>
   )
 }
@@ -113,14 +113,12 @@ function ExpenseModal({ expense, onClose }) {
     setFileError('')
     if (!file) return
     if (file.size > MAX_FILE) return setFileError('File is larger than 2 MB.')
-    const reader = new FileReader()
-    reader.onload = () => setAttachment({ name: file.name, type: file.type, url: reader.result })
-    reader.readAsDataURL(file)
+    if (!/^(image\/(png|jpeg|webp)|application\/pdf)$/.test(file.type)) return setFileError('Use a PNG, JPG, WebP or PDF file.')
+    setAttachment(file) // uploaded to private storage when the expense is saved
   }
   const save = async (d) => {
     try {
-      await new Promise((r) => setTimeout(r, 250))
-      saveExpense({ ...d, attachment }, expense?.id)
+      await saveExpense({ ...d, attachment }, expense?.id)
       toast.success(expense ? 'Expense updated.' : 'Expense added.')
       onClose()
     } catch (err) { toast.error(err.message) }
@@ -147,4 +145,15 @@ function ExpenseModal({ expense, onClose }) {
       </form>
     </Modal>
   )
+}
+
+/** Bills live in a private bucket; open them through a short-lived signed link. */
+function AttachmentLink({ attachment }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const open = async () => {
+    setBusy(true)
+    try { window.open(await getAttachmentUrl(attachment.path), '_blank', 'noopener') } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  return <button type="button" onClick={open} className="font-medium text-primary hover:underline">{busy ? 'Opening…' : attachment.name}</button>
 }

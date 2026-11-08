@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { getSettings, bookedHours } from '@/services/store'
-import { formatDuration, formatHour, slotLabel, todayISO } from '@/utils/format'
+import { formatDuration, formatHour, istHour, slotLabel, todayISO } from '@/utils/format'
 import { cn } from '@/utils/cn'
 import { format } from 'date-fns'
 
@@ -12,13 +12,12 @@ import { format } from 'date-fns'
 export default function SlotPicker({ date, value, onChange }) {
   const { open_hour, close_hour } = getSettings()
   const taken = useMemo(() => bookedHours(date), [date])
-  const now = new Date()
   const isToday = date === todayISO()
   const hours = Array.from({ length: Math.max(0, close_hour - open_hour) }, (_, i) => open_hour + i)
 
   const state = (h) => {
     if (taken.has(h)) return 'booked'
-    if (isToday && h <= now.getHours()) return 'past' // already started
+    if (isToday && h <= istHour()) return 'past' // already started
     return 'free'
   }
   const selected = (h) => value && h >= value.start && h < value.end

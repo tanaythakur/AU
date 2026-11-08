@@ -39,8 +39,7 @@ function Inner({ onClose }) {
     if (!slots) return toast.error('Pick at least one time slot.')
     setSaving(true)
     try {
-      await new Promise((r) => setTimeout(r, 350))
-      const { booking } = addBooking({ ...d, start_hour: slots.start, end_hour: slots.end, total_amount: total, advance: pay.payload })
+      const { booking } = await addBooking({ ...d, start_hour: slots.start, end_hour: slots.end, total_amount: total, advance: pay.payload })
       setDone(enrichBooking(booking))
       toast.success('Booking created.')
     } catch (e) {

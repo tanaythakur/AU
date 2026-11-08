@@ -5,7 +5,7 @@ import { CircleCheck } from 'lucide-react'
 import { Button, Drawer, FormField, Input, InlineAlert, useToast } from '@/components/ui'
 import PaymentPanel, { usePayment } from '@/components/payments/PaymentPanel'
 import { PlanPicker, StudentPicker } from '@/components/common/pickers'
-import { addMembership, endDateFor, getPlan, getStudent, membershipsOf, overlapFor, recordPayment, suggestedStart } from '@/services/store'
+import { addMembership, endDateFor, getPlan, getStudent, membershipsOf, overlapFor, suggestedStart } from '@/services/store'
 import { formatDate, formatINR } from '@/utils/format'
 
 /** New membership for an existing student, or a renewal (student fixed, plan preselected). */
@@ -38,10 +38,9 @@ function Inner({ onClose, studentId, renew }) {
   const submit = async () => {
     setSaving(true)
     try {
-      await new Promise((r) => setTimeout(r, 350)) // demo latency
-      const m = addMembership({ student_id: sid, plan_id: planId, start_date: start })
-      const p = pay.payload ? recordPayment({ student_id: sid, membership_id: m.id, ...pay.payload }) : null
-      setDone({ m, p })
+      // membership + first payment are saved in ONE database transaction
+      const { membership: m, payment: p } = await addMembership({ student_id: sid, plan_id: planId, start_date: start, payment: pay.payload })
+      setDone({ m, p: p || null })
       toast.success(renew ? 'Renewal completed.' : 'Membership added.')
     } catch (e) {
       toast.error(e.message)

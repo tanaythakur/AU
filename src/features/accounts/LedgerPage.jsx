@@ -5,12 +5,12 @@ import { Button, DataTable, EmptyState, FilterBar, FilterSelect, SearchInput, St
 import { ledger } from '@/services/accounting'
 import { useStore } from '@/services/store'
 import { downloadCSV, formatDate, formatINR } from '@/utils/format'
-import { useSimulatedLoading } from '@/hooks/useSimulatedLoading'
+import { usePageLoading } from '@/hooks/usePageLoading'
 
 export default function LedgerPage() {
   const v = useStore()
   const { range } = useOutletContext()
-  const loading = useSimulatedLoading(300)
+  const loading = usePageLoading()
   const [q, setQ] = useState('')
   const [type, setType] = useState('all')
   const led = useMemo(() => ledger(range), [range, v])

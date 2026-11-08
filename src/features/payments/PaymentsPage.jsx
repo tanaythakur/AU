@@ -4,10 +4,10 @@ import { Download, Ellipsis, IndianRupee, Printer, RotateCcw } from 'lucide-reac
 import {
   ConfirmDialog, DataTable, DropdownMenu, EmptyState, FilterBar, FilterSelect, Button, PageHeader, SearchInput, StatCard, StatusBadge, useToast,
 } from '@/components/ui'
-import { PAYMENT_METHODS, PERIOD_OPTIONS, methodLabel, payments } from '@/data/mock'
+import { PAYMENT_METHODS, PERIOD_OPTIONS, methodLabel, payments } from '@/data/db'
 import { inRange, payerName, paymentLinkLabel, paymentType, periodRange, refundPayment, useStore } from '@/services/store'
 import { downloadCSV, formatDateTime, formatINR } from '@/utils/format'
-import { useSimulatedLoading } from '@/hooks/useSimulatedLoading'
+import { usePageLoading } from '@/hooks/usePageLoading'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 
 /** Ledger only. Payments are created where they are collected (student, membership, arena). */
@@ -16,7 +16,7 @@ export default function PaymentsPage() {
   const v = useStore()
   const navigate = useNavigate()
   const toast = useToast()
-  const loading = useSimulatedLoading()
+  const loading = usePageLoading()
   const [q, setQ] = useState('')
   const [period, setPeriod] = useState('this_month')
   const [type, setType] = useState('all')
@@ -94,7 +94,7 @@ export default function PaymentsPage() {
         open={!!refunding} onClose={() => setRefunding(null)} title="Mark as refunded?"
         message={`${refunding?.receipt_number} (${formatINR(refunding?.amount)}) will stay in the ledger as refunded and stop counting as cash collected.`}
         confirmLabel="Mark refunded"
-        onConfirm={() => { refundPayment(refunding.id); toast.success('Payment marked as refunded.'); setRefunding(null) }}
+        onConfirm={async () => { try { await refundPayment(refunding.id); toast.success('Payment marked as refunded.'); setRefunding(null) } catch (e) { toast.error(e.message) } }}
       />
     </>
   )

@@ -29,8 +29,7 @@ function Inner({ target, onClose }) {
   const submit = async () => {
     setSaving(true)
     try {
-      await new Promise((r) => setTimeout(r, 300))
-      const p = recordPayment({ student_id: m?.student_id, membership_id: m?.id, arena_booking_id: b?.id, ...pay.payload })
+      const p = await recordPayment({ membership_id: m?.id, arena_booking_id: b?.id, ...pay.payload })
       setDone(p)
       toast.success('Payment recorded.')
     } catch (e) {

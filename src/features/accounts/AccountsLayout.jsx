@@ -31,8 +31,8 @@ export default function AccountsLayout() {
   const doExport = async () => {
     setExporting(true)
     try {
-      const name = await exportAccountingExcel(range)
-      toast.success(`Downloaded ${name}`)
+      const { name, source } = await exportAccountingExcel(range)
+      toast.success(source === 'server' ? `Downloaded ${name}` : `Downloaded ${name} (built in your browser: the server export function is not deployed yet)`)
     } catch (e) {
       toast.error(`Export failed: ${e.message}`)
     } finally {

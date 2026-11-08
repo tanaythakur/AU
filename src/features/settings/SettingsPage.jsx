@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Pencil, Plus } from 'lucide-react'
 import { Button, Card, CardHeader, Checkbox, DataTable, FormField, Input, Modal, PageHeader, StatusBadge, useToast } from '@/components/ui'
-import { plans } from '@/data/mock'
+import { plans } from '@/data/db'
+import { supabase } from '@/lib/supabaseClient'
 import { getSettings, savePlan, updateSettings, useStore } from '@/services/store'
 import { formatINR } from '@/utils/format'
 import { cn } from '@/utils/cn'
@@ -48,7 +49,7 @@ function AcademyForm() {
   return (
     <Card>
       <CardHeader title="Academy & payments" description="Used on receipts, WhatsApp messages and the payment QR code." />
-      <form className="grid gap-4 sm:grid-cols-2" noValidate onSubmit={handleSubmit((d) => { updateSettings({ ...d, hourly_rate: Number(d.hourly_rate), open_hour: Number(d.open_hour), close_hour: Number(d.close_hour) }); toast.success('Settings saved.') })}>
+      <form className="grid gap-4 sm:grid-cols-2" noValidate onSubmit={handleSubmit(async (d) => { try { await updateSettings(d); toast.success('Settings saved.') } catch (e) { toast.error(e.message) } })}>
         <FormField label="Academy name" required error={errors.name?.message} className="sm:col-span-2">
           <Input error={errors.name} {...register('name', { required: 'Academy name is required' })} />
         </FormField>
@@ -78,17 +79,23 @@ function AdminForm() {
   const toast = useToast()
   const { user } = useAuth()
   const pw = useForm()
+  const change = async ({ password }) => {
+    const { error } = await supabase.auth.updateUser({ password })
+    if (error) return toast.error(/same|different/i.test(error.message) ? 'Choose a password you have not used before.' : error.message)
+    toast.success('Password updated.')
+    pw.reset()
+  }
   return (
     <Card>
       <CardHeader title="Admin account" description={user?.email} />
-      <form className="grid gap-4 sm:grid-cols-2" noValidate onSubmit={pw.handleSubmit(() => { toast.success('Password updated (demo, Supabase Auth later).'); pw.reset() })}>
+      <form className="grid gap-4 sm:grid-cols-2" noValidate onSubmit={pw.handleSubmit(change)}>
         <FormField label="New password" required error={pw.formState.errors.password?.message}>
           <Input type="password" autoComplete="new-password" error={pw.formState.errors.password} {...pw.register('password', { required: 'Enter a new password', minLength: { value: 8, message: 'Use at least 8 characters' } })} />
         </FormField>
         <FormField label="Confirm password" required error={pw.formState.errors.confirm?.message}>
           <Input type="password" autoComplete="new-password" error={pw.formState.errors.confirm} {...pw.register('confirm', { validate: (v) => v === pw.getValues('password') || 'Passwords do not match' })} />
         </FormField>
-        <div className="sm:col-span-2"><Button type="submit" variant="secondary">Update password</Button></div>
+        <div className="sm:col-span-2"><Button type="submit" variant="secondary" loading={pw.formState.isSubmitting}>Update password</Button></div>
       </form>
     </Card>
   )
@@ -103,10 +110,12 @@ function PlansSection() {
     reset(p === 'new' ? { name: '', duration_months: '', standard_price: '', description: '', is_active: true } : p)
     setEditing(p)
   }
-  const save = (d) => {
-    savePlan(d, editing === 'new' ? undefined : editing.id)
-    toast.success('Plan saved. New price applies to future memberships only.')
-    setEditing(null)
+  const save = async (d) => {
+    try {
+      await savePlan(d, editing === 'new' ? undefined : editing.id)
+      toast.success('Plan saved. New price applies to future memberships only.')
+      setEditing(null)
+    } catch (e) { toast.error(e.message) }
   }
   const cols = [
     { key: 'name', header: 'Plan', render: (p) => <span className="font-medium">{p.name}</span> },

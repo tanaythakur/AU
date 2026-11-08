@@ -6,7 +6,7 @@ import { formatDateTime } from '@/utils/format'
 
 const TONE = { create: 'success', update: 'info', delete: 'danger', refund: 'warning', cancel: 'warning', export: 'neutral' }
 
-/** Every financial change made in this session (create, edit, delete, refund, cancel, export). Not period-filtered. */
+/** Latest 500 changes (create, edit, delete, refund, cancel, export). Not period-filtered. */
 export default function AuditPage() {
   const v = useStore()
   const [q, setQ] = useState('')
@@ -31,10 +31,10 @@ export default function AuditPage() {
   ]
   return (
     <>
-      <p className="mb-6 max-w-2xl text-body text-text-secondary">A permanent trail of who changed financial records and when. Entries cannot be edited or deleted from the app.</p>
+      <p className="mb-6 max-w-2xl text-body text-text-secondary">A permanent trail of who changed financial records and when. Entries are written by the database and cannot be edited or deleted from the app.</p>
       <FilterBar>
         <SearchInput value={q} onChange={setQ} placeholder="Search summary or ID" />
-        <FilterSelect label="Record" value={entity} onChange={setEntity} options={[{ value: 'all', label: 'All records' }, ...['payment', 'expense', 'income', 'booking', 'membership', 'export'].map((e) => ({ value: e, label: e[0].toUpperCase() + e.slice(1) }))]} />
+        <FilterSelect label="Record" value={entity} onChange={setEntity} options={[{ value: 'all', label: 'All records' }, ...['payment', 'expense', 'income', 'booking', 'membership', 'student', 'plan', 'settings', 'export'].map((e) => ({ value: e, label: e[0].toUpperCase() + e.slice(1) }))]} />
       </FilterBar>
       <DataTable columns={columns} rows={rows} minWidth={900} pageSize={12}
         empty={<EmptyState icon={ShieldCheck} title="No changes recorded yet" description="Create, edit or delete a financial record and it will appear here." />} />

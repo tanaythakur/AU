@@ -3,6 +3,7 @@ import { Calendar, ChevronDown, LogOut, Menu, Settings, User } from 'lucide-reac
 import { format } from 'date-fns'
 import { Breadcrumbs, DropdownMenu, IconButton } from '@/components/ui'
 import { initials } from '@/utils/format'
+import { TODAY } from '@/data/db'
 import { useAuth } from '@/features/auth/AuthContext'
 
 const LABELS = {
@@ -33,7 +34,7 @@ export default function Topbar({ onMenu }) {
       <Breadcrumbs items={crumbsFor(pathname)} className="flex-1" />
       <div className="hidden items-center gap-2 text-body-sm text-text-secondary sm:flex">
         <Calendar size={16} />
-        {format(new Date(), 'EEE, dd MMM yyyy')}
+        {format(TODAY, 'EEE, dd MMM yyyy')}
       </div>
       <DropdownMenu
         label="Admin menu"
