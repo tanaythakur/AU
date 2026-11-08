@@ -1,13 +1,26 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Check, Search, X } from 'lucide-react'
 import { plans } from '@/data/db'
 import { students } from '@/data/db'
+import { useStore } from '@/services/store'
 import { formatINR } from '@/utils/format'
 import { cn } from '@/utils/cn'
 
 /** Plan cards: price and duration are shown automatically on selection. */
 export function PlanPicker({ value, onChange }) {
+  useStore() // re-render when plans change
   const active = plans.filter((p) => p.is_active)
+  if (active.length === 0)
+    return (
+      <div role="alert" className="rounded-md border border-warning/40 bg-warning-bg p-4 text-body-sm text-warning-text">
+        <p className="font-semibold">Abhi koi membership plan nahi hai.</p>
+        <p className="mt-0.5">
+          Pehle plans banao: <Link to="/settings" className="font-semibold underline">Settings → Membership plans → Add Plan</Link>{' '}
+          (jaise Monthly ₹1,500, 1 month). Uske baad wapas aakar student add karo. Plan ke bina bhi student save ho sakta hai.
+        </p>
+      </div>
+    )
   return (
     <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Membership plan">
       {active.map((p) => {

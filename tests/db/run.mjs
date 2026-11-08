@@ -207,6 +207,25 @@ try {
     await adm((c) => c.query('update membership_plans set price=1500 where id=$1', [monthly]))
   })
 
+  await T('delete student: allowed only with no history; with memberships it is refused and archiving keeps the books intact', async () => {
+    const fresh = (await rpc('enroll_student', { p_full_name: 'Mistake Entry', p_mobile: '9812399991' })).student_id
+    await rpc('delete_student', { p_student_id: fresh })
+    eq((await sup.query('select count(*)::int n from students where id=$1', [fresh])).rows[0].n, 0, 'row removed')
+    const log = (await sup.query("select action, before->>'full_name' n from audit_logs where entity='students' and entity_id=$1 order by id", [fresh])).rows
+    eq(log.map((x) => x.action), ['create', 'delete'], 'create and delete are both audited'); eq(log[1].n, 'Mistake Entry', 'snapshot of the deleted student')
+    await rejects(rpc('delete_student', { p_student_id: s1 }), /cannot be deleted/)
+    eq((await sup.query('select count(*)::int n from students where id=$1', [s1])).rows[0].n, 1, 'student with history still exists')
+    await rejects(adm((c) => c.query('delete from students where id=$1', [fresh])), /permission denied/) // no direct DELETE grant
+    await rejects(rpc('delete_student', { p_student_id: crypto.randomUUID() }), /not found/)
+    await rejects(asUser(sup, outsiderId, (c) => c.query('select public.delete_student($1)', [s1])), /Not authorized/)
+    await rejects(asUser(sup, null, (c) => c.query('select public.delete_student($1)', [s1])), /permission denied/)
+    const before = (await sup.query('select public.accounting_summary() r')).rows[0].r
+    await adm((c) => c.query("update students set status='archived' where id=$1", [s1]))
+    const after = (await sup.query('select public.accounting_summary() r')).rows[0].r
+    eq([after.revenue, after.cash_received, after.receivables], [before.revenue, before.cash_received, before.receivables], 'archiving must not change any financial figure')
+    await adm((c) => c.query("update students set status='active' where id=$1", [s1])) // restore
+  })
+
   /* ---------------------------------------------------------------- arena */
   const book = (o) => rpc('create_arena_booking', { p_customer_name: 'Team A', p_mobile: '9893012345', p_booking_date: '2026-12-10', p_total: 1000, ...o })
   await T('arena: books a slot, creates the customer, takes the advance as a linked payment', async () => {

@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { IndianRupee, Pencil, Phone, Printer, RefreshCw } from 'lucide-react'
-import { Button, Card, CardHeader, DataTable, EmptyState, IconButton, PageHeader, StatusBadge } from '@/components/ui'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ArchiveRestore, IndianRupee, Pencil, Phone, Printer, RefreshCw, Trash2 } from 'lucide-react'
+import { Button, Card, DataTable, EmptyState, IconButton, PageHeader, StatusBadge } from '@/components/ui'
 import { methodLabel, payments } from '@/data/db'
 import { enrichMembership, getStudent, membershipsOf, paymentLinkLabel, studentRow, useStore } from '@/services/store'
 import { formatDate, formatDateTime, formatINR, initials } from '@/utils/format'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import MembershipDrawer from './MembershipDrawer'
 import CollectDrawer from '@/features/payments/CollectDrawer'
+import StudentRemoveDialog from './StudentRemoveDialog'
 
 export default function StudentProfilePage() {
   const { id } = useParams()
@@ -16,6 +17,8 @@ export default function StudentProfilePage() {
   useDocumentTitle(student?.full_name)
   const [renew, setRenew] = useState(false)
   const [collect, setCollect] = useState(null)
+  const [removing, setRemoving] = useState(false)
+  const navigate = useNavigate()
 
   const row = useMemo(() => (student ? studentRow(student) : null), [student, v])
   const ms = useMemo(() => membershipsOf(id).map(enrichMembership), [id, v])
@@ -33,9 +36,16 @@ export default function StudentProfilePage() {
         back={{ to: '/students', label: 'Students' }}
         actions={
           <>
-            <Button variant="secondary" as={Link} to={`/students/${id}/edit`} icon={Pencil}>Edit</Button>
-            {row.outstanding > 0 && <Button variant="secondary" icon={IndianRupee} onClick={() => setCollect({ membershipId: row.unpaid_membership.id })}>Collect {formatINR(row.unpaid_membership.balance)}</Button>}
-            <Button icon={RefreshCw} onClick={() => setRenew(true)}>Renew</Button>
+            {student.status === 'archived' ? (
+              <Button icon={ArchiveRestore} onClick={() => setRemoving(true)}>Restore student</Button>
+            ) : (
+              <>
+                <Button variant="secondary" as={Link} to={`/students/${id}/edit`} icon={Pencil}>Edit</Button>
+                <Button variant="secondary" icon={Trash2} onClick={() => setRemoving(true)}>{membershipsOf(id).length ? 'Archive' : 'Delete'}</Button>
+              </>
+            )}
+            {student.status === 'active' && row.outstanding > 0 && <Button variant="secondary" icon={IndianRupee} onClick={() => setCollect({ membershipId: row.unpaid_membership.id })}>Collect {formatINR(row.unpaid_membership.balance)}</Button>}
+            {student.status === 'active' && <Button icon={RefreshCw} onClick={() => setRenew(true)}>Renew</Button>}
           </>
         }
       />
@@ -88,6 +98,7 @@ export default function StudentProfilePage() {
 
       <MembershipDrawer key={renew ? 'r' : 'x'} open={renew} onClose={() => setRenew(false)} studentId={id} renew />
       <CollectDrawer target={collect} onClose={() => setCollect(null)} />
+      <StudentRemoveDialog student={removing ? student : null} onClose={() => setRemoving(false)} onDone={(kind) => kind === 'deleted' && navigate('/students', { replace: true })} />
     </>
   )
 }

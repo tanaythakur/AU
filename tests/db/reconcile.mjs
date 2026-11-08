@@ -8,7 +8,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { addDays, format } from 'date-fns'
 import { asUser, root } from './lib.mjs'
-import * as seed from '../fixtures/test-data.js'
+import * as data from '../fixtures/test-data.js'
 
 const D = (d) => format(d, 'yyyy-MM-dd')
 const ist = (s) => (s ? `${s.length === 10 ? `${s}T12:00:00` : s}+05:30` : null)

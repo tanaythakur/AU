@@ -140,6 +140,17 @@ export async function updateStudent(id, patch) {
   await refresh('students', 'audit')
 }
 
+/** Permanent delete. The database refuses it if the student has any membership/payment history (archive instead). */
+export async function deleteStudent(id) {
+  await run(supabase.rpc('delete_student', { p_student_id: id }))
+  await refresh('students', 'audit')
+}
+/** 'archived' hides a student from lists but keeps every payment and report; 'active' restores. */
+export async function setStudentStatus(id, status) {
+  await run(supabase.from('students').update({ status }).eq('id', id))
+  await refresh('students', 'audit')
+}
+
 /** Hours already taken on a date. Display aid only: the database exclusion constraint is the real guard. */
 export const bookedHours = (dateISO) => {
   const taken = new Set()

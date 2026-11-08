@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Download, IndianRupee, Pencil, Plus, RefreshCw, Users } from 'lucide-react'
+import { ArchiveRestore, Download, IndianRupee, Pencil, Plus, RefreshCw, Trash2, Users } from 'lucide-react'
 import { Button, DataTable, EmptyState, FilterBar, IconButton, PageHeader, SearchInput, StatusBadge } from '@/components/ui'
 import { students } from '@/data/db'
 import { studentRow, useStore } from '@/services/store'
@@ -10,6 +10,7 @@ import { usePageLoading } from '@/hooks/usePageLoading'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import MembershipDrawer from './MembershipDrawer'
 import CollectDrawer from '@/features/payments/CollectDrawer'
+import StudentRemoveDialog from './StudentRemoveDialog'
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -17,6 +18,7 @@ const FILTERS = [
   { key: 'expiring', label: 'Expiring soon' },
   { key: 'expired', label: 'Expired' },
   { key: 'due', label: 'Balance due' },
+  { key: 'archived', label: 'Archived' },
 ]
 
 export default function StudentsPage() {
@@ -28,11 +30,14 @@ export default function StudentsPage() {
   const [filter, setFilter] = useState('all')
   const [membershipFor, setMembershipFor] = useState(null) // {studentId, renew} | {new:true}
   const [collect, setCollect] = useState(null)
+  const [removing, setRemoving] = useState(null)
 
-  const all = useMemo(() => students.filter((s) => s.status === 'active').map(studentRow), [v])
+  const everyone = useMemo(() => students.map(studentRow), [v])
+  const all = useMemo(() => everyone.filter((s) => s.status === 'active'), [everyone])
+  const archived = useMemo(() => everyone.filter((s) => s.status === 'archived'), [everyone])
   const rows = useMemo(() => {
     const t = q.trim().toLowerCase()
-    return all
+    return (filter === 'archived' ? archived : all)
       .filter((s) => !t || s.full_name.toLowerCase().includes(t) || s.mobile.includes(t))
       .filter((s) => {
         const c = s.current
@@ -42,7 +47,7 @@ export default function StudentsPage() {
         if (filter === 'due') return s.outstanding > 0
         return true
       })
-  }, [all, q, filter])
+  }, [all, archived, q, filter])
 
   const counts = {
     all: all.length,
@@ -50,6 +55,7 @@ export default function StudentsPage() {
     expiring: all.filter((s) => s.current?.status === 'active' && s.current.days_left <= 7).length,
     expired: all.filter((s) => ['expired', 'none'].includes(s.membership_status)).length,
     due: all.filter((s) => s.outstanding > 0).length,
+    archived: archived.length,
   }
 
   const columns = [
@@ -77,9 +83,11 @@ export default function StudentsPage() {
       key: 'a', header: '', align: 'right',
       render: (s) => (
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-          {s.outstanding > 0 && <Button size="sm" variant="secondary" icon={IndianRupee} onClick={() => setCollect({ membershipId: s.unpaid_membership.id })}>Collect</Button>}
-          <Button size="sm" icon={RefreshCw} onClick={() => setMembershipFor({ studentId: s.id, renew: true })}>Renew</Button>
-          <IconButton as={Link} to={`/students/${s.id}/edit`} icon={Pencil} label="Edit student" size="sm" />
+          {s.status === 'active' && s.outstanding > 0 && <Button size="sm" variant="secondary" icon={IndianRupee} onClick={() => setCollect({ membershipId: s.unpaid_membership.id })}>Collect</Button>}
+          {s.status === 'active' && <Button size="sm" icon={RefreshCw} onClick={() => setMembershipFor({ studentId: s.id, renew: true })}>Renew</Button>}
+          {s.status === 'archived'
+            ? <Button size="sm" variant="secondary" icon={ArchiveRestore} onClick={() => setRemoving(s)}>Restore</Button>
+            : <><IconButton as={Link} to={`/students/${s.id}/edit`} icon={Pencil} label="Edit student" size="sm" /><IconButton icon={Trash2} label={`Delete or archive ${s.full_name}`} size="sm" onClick={() => setRemoving(s)} /></>}
         </div>
       ),
     },
@@ -115,6 +123,7 @@ export default function StudentsPage() {
 
       <MembershipDrawer key={membershipFor ? membershipFor.studentId || 'new' : 'x'} open={!!membershipFor} onClose={() => setMembershipFor(null)} studentId={membershipFor?.studentId} renew={membershipFor?.renew} />
       <CollectDrawer target={collect} onClose={() => setCollect(null)} />
+      <StudentRemoveDialog student={removing} onClose={() => setRemoving(null)} />
     </>
   )
 }

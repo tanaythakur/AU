@@ -23,6 +23,7 @@ Each should finish with *Success. No rows returned*.
 3. `migrations/0003_business_functions.sql` atomic payment / membership / booking functions
 4. `migrations/0004_audit_and_reporting.sql` audit trail + reporting functions
 5. `migrations/0005_storage.sql`          private bucket for expense bills
+6. `migrations/0006_student_delete.sql`   delete (or archive) a student
 
 (Or with the CLI: `npx supabase login`, `npx supabase link --project-ref <ref>`, `npx supabase db push`.)
 
